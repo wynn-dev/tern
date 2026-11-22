@@ -4,11 +4,14 @@ import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
 import { App } from "./app";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { syncStoreWithUrl } from "./lib/store";
 import "./styles.css";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: true, retry: 1 }, mutations: { retry: 0 } },
 });
+
+syncStoreWithUrl();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

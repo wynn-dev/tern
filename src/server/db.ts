@@ -329,7 +329,9 @@ export function queryThreads({ view, account, q, before, limit = 60 }: ThreadQue
     where.push("t.category = ? AND t.in_inbox = 1 AND t.in_trash = 0 AND t.in_spam = 0");
     args.push(view.slice(9));
   } else if (view.startsWith("label:")) {
-    where.push("EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = ?)");
+    // by name, so a label that several accounts share is one view; Gmail's label ids are per account
+    where.push(`t.in_trash = 0 AND t.in_spam = 0 AND EXISTS (SELECT 1 FROM json_each(t.labels) j
+      JOIN labels l ON l.account_id = t.account_id AND l.id = j.value WHERE l.name = ?)`);
     args.push(view.slice(6));
   }
   if (account) {

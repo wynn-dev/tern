@@ -6,7 +6,7 @@ import { api, threadKey, type Message, type Thread } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { prefetchThread, useAccounts, useActions } from "./data";
 
-const GOTO: Record<string, string> = { i: "inbox", r: "needs-reply", s: "starred", t: "sent", a: "all", "#": "trash" };
+const GOTO: Record<string, string> = { i: "inbox", r: "needs-reply", s: "starred", t: "sent", a: "all", "!": "spam", "#": "trash" };
 
 export const SHORTCUTS: [string, string][] = [
   ["J / K", "Next / previous conversation"],
@@ -22,7 +22,7 @@ export const SHORTCUTS: [string, string][] = [
   ["C", "New message"],
   ["/", "Search"],
   ["⌘ K", "Command menu"],
-  ["G then I · R · S · T · A", "Go to Inbox, Needs reply, Starred, Sent, All"],
+  ["G then I · R · S · T · A · !", "Go to Inbox, Needs reply, Starred, Sent, All, Spam"],
   [",", "Settings"],
   ["?", "This list"],
 ];
@@ -60,7 +60,7 @@ export function useKeyboard() {
         }
       };
       // after archiving, land on the next conversation, as in a queue
-      const removeAndAdvance = (action: "archive" | "trash" | "spam") => {
+      const removeAndAdvance = (action: "archive" | "trash" | "spam" | "notspam") => {
         if (!current) return;
         const next = threads[i + 1] ?? threads[i - 1];
         s.select(next ? threadKey(next) : null);
@@ -92,7 +92,7 @@ export function useKeyboard() {
         e: () => removeAndAdvance("archive"),
         E: () => current && void act([current], "inbox"),
         "#": () => removeAndAdvance("trash"),
-        "!": () => removeAndAdvance("spam"),
+        "!": () => (current?.in_spam ? removeAndAdvance("notspam") : removeAndAdvance("spam")),
         s: () => current && void act([current], current.starred ? "unstar" : "star"),
         u: () => current && void act([current], current.unread ? "read" : "unread"),
         r: () => void reply(false),

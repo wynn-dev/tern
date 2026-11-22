@@ -20,7 +20,7 @@ Everything ships as a single file: `bun build --compile` bundles the server, the
 
 ## Data and sync (`src/server/sync.ts`, `db.ts`)
 
-- **Initial sync:** list the last `sync.initialDays` days of mail (capped at `sync.maxInitial`), then fetch it 8 at a time in `format=full`. Rows go into SQLite in batches, and each batch is pushed to the UI as it lands, so the inbox fills in live.
+- **Initial sync:** list the last `sync.initialDays` days of mail (capped at `sync.maxInitial`) plus the 200 newest spam messages, which Gmail leaves out of listings, then fetch it 8 at a time in `format=full`. Rows go into SQLite in batches, and each batch is pushed to the UI as it lands, so the inbox fills in live.
 - **Incremental sync:** every `sync.intervalSec` (30 s by default), run Gmail `history.list` from the stored `historyId`. Only new messages are fetched in full. A label change only refreshes that message's labels. If the history id has expired (404), it falls back to a full resync.
 - **Threads table:** a denormalised row per conversation (flags, participants, last date, AI verdict), rebuilt from its messages whenever one changes. List queries hit a single indexed table, so they never touch messages.
 - **Search:** an FTS5 index over subject, sender and body, kept in sync by triggers. It does prefix matching (`invo` finds *invoice*). Search runs locally, so it's instant and works offline.
@@ -46,6 +46,8 @@ There's one SSE stream, `/api/events`. Sync, AI and actions emit `{type, keys}`.
 - React 19, TanStack Query (cache and optimistic updates), TanStack Virtual (list), zustand (UI state), cmdk (⌘K), radix primitives styled as shadcn/ui, motion for layout and presence animations, Geist and Geist Mono.
 - Motion budget: 100–250 ms with one shared ease (`cubic-bezier(.2,.9,.1,1)`) and springs with little bounce. Lists slide on removal with CSS transforms, which stays cheap even under virtualisation.
 - HTML mail is rendered in a sandboxed iframe (no scripts) with a strict CSP. Remote images are blocked until you click to load them, which defeats tracking pixels. Links open in a new tab.
+- The view lives in the URL (`/label/Clients/<account>/<thread>?account=…&q=…`, see `lib/route.ts`), so refresh restores it and Back/Forward move between views. zustand stays the source of truth and the URL follows it: a new folder, account, search or opened thread pushes a history entry, while j/k and search refinements replace it (coalesced, so holding j doesn't flood history). Closing a thread or clearing a search goes back to the entry it came from.
+- User labels are matched by name, so a label that several accounts share is one view; spam only appears under Spam.
 - Mail is marked read after 600 ms on a thread, so flicking through with j/k doesn't mark everything read.
 
 ## Security

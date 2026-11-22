@@ -38,7 +38,7 @@ export function prefetchThread(qc: QueryClient, t: Thread) {
 
 /** Does `t` still belong in `view` after this action? */
 function staysInView(view: string, action: Action) {
-  if (action === "archive" || action === "trash" || action === "spam") return view === "all" && action === "archive";
+  if (action === "archive" || action === "trash" || action === "spam") return (view === "all" || view.startsWith("label:")) && action === "archive";
   if (action === "unstar") return view !== "starred";
   if (action === "untrash") return view !== "trash";
   if (action === "notspam") return view !== "spam";
@@ -55,12 +55,14 @@ function patch(t: Thread, action: Action): Thread {
     case "inbox": return { ...t, in_inbox: 1 };
     case "trash": return { ...t, in_trash: 1, in_inbox: 0 };
     case "untrash": return { ...t, in_trash: 0, in_inbox: 1 };
+    case "spam": return { ...t, in_spam: 1, in_inbox: 0 };
+    case "notspam": return { ...t, in_spam: 0, in_inbox: 1 };
     default: return t;
   }
 }
 
-const UNDO: Partial<Record<Action, Action>> = { archive: "inbox", trash: "untrash", spam: "notspam" };
-const VERB: Partial<Record<Action, string>> = { archive: "Archived", trash: "Moved to trash", spam: "Marked as spam" };
+const UNDO: Partial<Record<Action, Action>> = { archive: "inbox", trash: "untrash", spam: "notspam", notspam: "spam" };
+const VERB: Partial<Record<Action, string>> = { archive: "Archived", trash: "Moved to trash", spam: "Marked as spam", notspam: "Moved to inbox" };
 
 export function useActions() {
   const qc = useQueryClient();
