@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, ApiError, onSignedOut, threadKey, type Action, type Session, type Thread } from "@/lib/api";
+import { api, ApiError, onSignedOut, threadKey, type AccountsResponse, type Action, type Counts, type Session, type Thread } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
 export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: api.accounts, staleTime: 10_000 });
@@ -83,6 +83,53 @@ export function undoLast() {
   return !!undo;
 }
 
+/** The newest copy of a thread the client holds: its row in a list, else the open thread. */
+function cached(qc: QueryClient, key: string): Thread | undefined {
+  for (const [, data] of qc.getQueriesData<InfiniteData<Page>>({ queryKey: ["threads"] }))
+    for (const p of data?.pages ?? []) for (const t of p.threads) if (threadKey(t) === key) return t;
+  return qc.getQueryData<{ thread: Thread }>(["thread", key])?.thread;
+}
+
+const FLAGS = ["unread", "starred", "in_inbox", "in_trash", "in_spam"] as const;
+/** `cur` with what `action` changed on `orig` put back, and whatever else changed since left alone. */
+function unpatch(cur: Thread, orig: Thread, action: Action): Thread {
+  const p = patch(orig, resolve(orig, action));
+  const back = FLAGS.filter((f) => p[f] !== orig[f]);
+  return back.length ? { ...cur, ...Object.fromEntries(back.map((f) => [f, orig[f]])) } : cur;
+}
+
+/** Lists run newest first, as the server orders them. */
+const newer = (a: Thread, b: Thread) =>
+  a.last_date !== b.last_date ? a.last_date > b.last_date : a.account_id !== b.account_id ? a.account_id > b.account_id : a.thread_id > b.thread_id;
+
+/** What a thread adds to the sidebar's counts, as the server counts them. */
+function tally(t: Thread) {
+  const inbox = !!t.in_inbox && !t.in_trash && !t.in_spam;
+  return { unread: +(inbox && !!t.unread), reply: +(inbox && !!t.needs_reply) };
+}
+/** The counts once `from` has become `to`. */
+function recount(c: Counts, from: Thread, to: Thread): Counts {
+  const a = tally(from), b = tally(to);
+  const du = b.unread - a.unread, dr = b.reply - a.reply;
+  const acc = c.accounts[to.account_id];
+  if ((!du && !dr) || !acc) return c;
+  const cat = to.category;
+  const bump = (m: Record<string, number>) => (cat && du ? { ...m, [cat]: Math.max(0, (m[cat] ?? 0) + du) } : m);
+  return {
+    accounts: { ...c.accounts, [to.account_id]: { inboxUnread: Math.max(0, acc.inboxUnread + du), needsReply: Math.max(0, acc.needsReply + dr), categories: bump(acc.categories) } },
+    categories: bump(c.categories),
+  };
+}
+function setCounts(qc: QueryClient, fn: (c: Counts) => Counts) {
+  if (!qc.getQueryData(["accounts"])) return;
+  // a refetch already on its way would land counts from before this
+  void qc.cancelQueries({ queryKey: ["accounts"] });
+  qc.setQueryData<AccountsResponse>(["accounts"], (d) => d && { ...d, counts: fn(d.counts) });
+}
+
+/** Actions sent and not yet answered: until they are, a refetched list can still have them undone. */
+let inFlight = 0;
+
 export const useActions = () => makeActions(useQueryClient());
 
 export function makeActions(qc: QueryClient) {
@@ -95,8 +142,10 @@ export function makeActions(qc: QueryClient) {
     if (seq) lastUndo = null;
     const keys = new Set(threads.map(threadKey));
     const snapshot = qc.getQueriesData<InfiniteData<Page>>({ queryKey: ["threads"] });
+    // as the client has them now, which can be newer than the copies passed in
+    const before = threads.map((t) => cached(qc, threadKey(t)) ?? t);
 
-    // optimistic: patch or drop the threads in every cached list
+    // optimistic: patch or drop the threads in every cached list, and the counts
     qc.setQueriesData<InfiniteData<Page>>({ queryKey: ["threads"] }, (data) => {
       if (!data) return data;
       return {
@@ -112,9 +161,13 @@ export function makeActions(qc: QueryClient) {
       };
     });
     for (const t of threads) qc.setQueryData<{ thread: Thread }>(["thread", threadKey(t)], (d) => (d ? { ...d, thread: patch(d.thread, resolve(d.thread, action)) } : d));
+    setCounts(qc, (c) => before.reduce((c, t) => recount(c, t, patch(t, resolve(t, action))), c));
 
-    try {
-      await Promise.all(threads.map((t) => api.act(t.account_id, t.thread_id, resolve(t, action))));
+    inFlight++;
+    const results = await Promise.allSettled(threads.map((t) => api.act(t.account_id, t.thread_id, resolve(t, action))));
+    inFlight--;
+    const failed = results.flatMap((r, i) => (r.status === "rejected" ? [{ t: before[i], e: r.reason as Error }] : []));
+    if (!failed.length) {
       const undo = UNDO[action];
       // an action started since then has answered first: it is the one `z` undoes
       if (undo && seq && seq === lastAction) {
@@ -133,14 +186,72 @@ export function makeActions(qc: QueryClient) {
         });
         lastUndo = run;
       }
-    } catch (e) {
-      for (const [k, v] of snapshot) qc.setQueryData(k, v);
+    } else {
+      rollback(qc, failed.map((f) => f.t), action, snapshot);
       // a 401 already took them to sign-in
-      if (!(e instanceof ApiError && e.status === 401)) toast.error(`Couldn't ${action}: ${(e as Error).message}`);
-    } finally {
-      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      const e = failed[0].e;
+      if (!(e instanceof ApiError && e.status === 401)) toast.error(`Couldn't ${action}: ${e.message}`);
     }
+    if (!inFlight) void qc.invalidateQueries({ queryKey: ["accounts"] });
   };
+}
+
+/**
+ * Undo an action that failed on these threads, and only it: actions taken since, on these threads or others
+ * (the next few read while flicking through), stay. A thread it took out of a list goes back where it was.
+ */
+function rollback(qc: QueryClient, threads: Thread[], action: Action, snapshot: [readonly unknown[], InfiniteData<Page> | undefined][]) {
+  const orig = new Map(threads.map((t) => [threadKey(t), t]));
+  for (const [queryKey, snap] of snapshot) {
+    const was = new Map(snap?.pages.flatMap((p) => p.threads).filter((t) => orig.has(threadKey(t))).map((t) => [threadKey(t), t]));
+    if (!was.size) continue;
+    qc.setQueryData<InfiniteData<Page>>(queryKey, (data) => {
+      if (!data) return data;
+      const pages = data.pages.map((p) => ({ ...p, threads: p.threads.map((t) => (was.has(threadKey(t)) ? unpatch(t, was.get(threadKey(t))!, action) : t)) }));
+      const shown = new Set(pages.flatMap((p) => p.threads.map(threadKey)));
+      for (const t of was.values()) {
+        if (shown.has(threadKey(t))) continue;
+        const p = pages.find((p) => p.threads.some((u) => newer(t, u))) ?? pages.at(-1);
+        if (!p) continue;
+        const i = p.threads.findIndex((u) => newer(t, u));
+        p.threads.splice(i < 0 ? p.threads.length : i, 0, t);
+      }
+      return { ...data, pages };
+    });
+  }
+  for (const t of threads) qc.setQueryData<{ thread: Thread }>(["thread", threadKey(t)], (d) => (d ? { ...d, thread: unpatch(d.thread, t, action) } : d));
+  setCounts(qc, (c) => threads.reduce((c, t) => recount(c, patch(t, resolve(t, action)), t), c));
+}
+
+/** When this changes, an open thread is marked read again: another thread, or a new message in this one. */
+export const readKey = (t: Thread) => `${threadKey(t)}:${t.last_date}`;
+/** Threads marked read, by readKey: the reader doesn't send it again for a copy fetched before the read landed. */
+const markedRead = new Set<string>();
+
+/**
+ * Mark an unread thread read, quietly. `again` marks it even if it was marked read before at this readKey,
+ * as opening it does after "Mark unread".
+ */
+export function markRead(act: ReturnType<typeof makeActions>, t: Thread | undefined, again = false) {
+  if (!t?.unread) return;
+  const k = readKey(t);
+  if (!again && markedRead.has(k)) return;
+  markedRead.add(k);
+  void act([t], "read", { quiet: true });
+}
+
+/**
+ * Opening a thread marks it read the moment it's selected: in the list, the counts and the header at once,
+ * without waiting for it to load or for the server, so flicking through with j/k reads every one.
+ */
+export function useReadOnOpen() {
+  const qc = useQueryClient();
+  useEffect(() => {
+    const act = makeActions(qc);
+    return useStore.subscribe((s, prev) => {
+      if (s.selected && s.selected !== prev.selected) markRead(act, cached(qc, s.selected), true);
+    });
+  }, [qc]);
 }
 
 /** When the server says the session has ended, stop fetching and show the sign-in screen. */
@@ -169,6 +280,11 @@ export function useLiveUpdates() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const pendingThreads = new Set<string>();
     const flush = () => {
+      // a list fetched now could still show actions on their way as not done: wait for their answers
+      if (inFlight) {
+        timer = setTimeout(flush, 250);
+        return;
+      }
       timer = undefined;
       void qc.invalidateQueries({ queryKey: ["threads"] });
       void qc.invalidateQueries({ queryKey: ["accounts"] });

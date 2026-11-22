@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
-import { useAccounts, useActions, useThread } from "@/hooks/data";
+import { markRead, readKey, useAccounts, useActions, useThread } from "@/hooks/data";
 import { api, type Message, type Thread } from "@/lib/api";
 import { addressLabel, bytes, displayName, longDate } from "@/lib/format";
 import { useStore } from "@/lib/store";
@@ -70,13 +70,9 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded(messages)));
   useEffect(() => setExpanded(new Set(initialExpanded(messages))), [thread.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // mark read after a beat, so flicking through with j/k doesn't; on open and when new mail arrives, not on
-  // every unread change, so "Mark unread" sticks
-  useEffect(() => {
-    if (!thread.unread) return;
-    const t = setTimeout(() => void act([thread], "read", { quiet: true }), 600);
-    return () => clearTimeout(t);
-  }, [readKey(thread, messages)]); // eslint-disable-line react-hooks/exhaustive-deps
+  // selecting it already marked it read (useReadOnOpen); this marks one opened from the URL, and new mail arriving in
+  // the open one, and not every unread change, so "Mark unread" sticks
+  useEffect(() => markRead(act, thread), [readKey(thread)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const qc = useQueryClient();
   const { data: ai } = useQuery({ queryKey: ["ai-status"], queryFn: api.aiStatus });
@@ -195,9 +191,6 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
     </>
   );
 }
-
-/** When this changes, an open thread is marked read again: another thread, or a new message in this one. */
-export const readKey = (thread: Thread, messages: Message[]) => `${thread.account_id}:${thread.thread_id}:${messages.at(-1)?.id}`;
 
 function initialExpanded(messages: Message[]) {
   return messages.filter((m, i) => i === messages.length - 1 || m.labels.includes("UNREAD")).map((m) => m.id);
