@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError, onSignedOut, threadKey, type Action, type Session, type Thread } from "@/lib/api";
 import { useStore } from "@/lib/store";
@@ -118,8 +118,13 @@ export function useSessionGuard() {
 /** Server-sent events keep every list fresh without polling. */
 export function useLiveUpdates() {
   const qc = useQueryClient();
+  // the stream lives as long as the session: it closes on sign-out and a new one opens on signing in again
+  const authed = !!useQuery({ queryKey: ["session"], queryFn: api.session }).data?.authed;
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (!authed) return;
     let dropped = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const pendingThreads = new Set<string>();
     const flush = () => {
@@ -133,8 +138,11 @@ export function useLiveUpdates() {
     es.onerror = () => {
       dropped = true;
       // the browser retries on its own after a network drop, but gives up for good on an HTTP error such as a 401:
-      // refetch so the request that fails says why (a 401 brings up sign-in)
-      if (es.readyState === EventSource.CLOSED) void qc.invalidateQueries({ queryKey: ["accounts"] });
+      // refetch so the request that fails says why (a 401 brings up sign-in), and open a new stream a little later
+      if (es.readyState === EventSource.CLOSED) {
+        void qc.invalidateQueries({ queryKey: ["accounts"] });
+        retry = setTimeout(() => setAttempt((n) => n + 1), 5_000);
+      }
     };
     // back after an outage: refetch what failed or went stale while it was down
     es.onopen = () => {
@@ -149,6 +157,7 @@ export function useLiveUpdates() {
     return () => {
       es.close();
       clearTimeout(timer);
+      clearTimeout(retry);
     };
-  }, [qc]);
+  }, [qc, authed, attempt]);
 }
