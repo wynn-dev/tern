@@ -3,7 +3,7 @@ import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon, PlusIcon, RefreshCw
 import { useState } from "react";
 import { useAccounts } from "@/hooks/data";
 import { type ThemePref, useTheme } from "@/hooks/theme";
-import { type Account, type AiPatch, api, type KeyHeader, type Settings } from "@/lib/api";
+import { type Account, type AiPatch, api, type Effort, type KeyHeader, type Settings } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
@@ -16,6 +16,15 @@ const MODELS = [
   { id: "claude-haiku-5-5", label: "Haiku 5.5 — fastest, lightest on your plan" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5 — balanced" },
   { id: "claude-opus-5-5", label: "Opus 5.5 — best writing" },
+];
+
+const EFFORTS: { id: Effort | ""; label: string }[] = [
+  { id: "", label: "Default effort" },
+  { id: "low", label: "Low effort" },
+  { id: "medium", label: "Medium effort" },
+  { id: "high", label: "High effort" },
+  { id: "xhigh", label: "Extra high effort" },
+  { id: "max", label: "Max effort" },
 ];
 
 const KEY_HEADERS: { id: KeyHeader; label: string }[] = [
@@ -99,12 +108,13 @@ function SettingsBody() {
     onError: (e) => toast.error(e.message),
   });
   const saveAi = useMutation({
-    mutationFn: (ai: Partial<Settings["ai"]>) => api.saveSettings({ ai }),
+    mutationFn: (ai: AiPatch) => api.saveSettings({ ai }),
     // show the change at once, and put it back if the save fails so nothing looks saved that isn't
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: ["settings"] });
       const prev = qc.getQueryData<Settings>(["settings"]);
-      if (prev) qc.setQueryData<Settings>(["settings"], { ...prev, ai: { ...prev.ai, ...patch } });
+      // an effort of "" (Default) shows as Default until the refetch drops it
+      if (prev) qc.setQueryData<Settings>(["settings"], { ...prev, ai: { ...prev.ai, ...patch } as Settings["ai"] });
       return { prev };
     },
     onError: (e, _, ctx) => {
@@ -171,8 +181,16 @@ function SettingsBody() {
             <Toggle label="Sort, summarize and draft with Claude" on={!!settings?.ai.enabled} onChange={(enabled) => saveAi.mutate({ enabled })} />
           </div>
           {/* a custom endpoint may name its models differently, so there they're typed in */}
-          <ModelPick label="Sorting" free={!!settings?.ai.baseUrl} value={settings?.ai.classifyModel} onChange={(classifyModel) => saveAi.mutate({ classifyModel })} />
-          <ModelPick label="Summaries & drafts" free={!!settings?.ai.baseUrl} value={settings?.ai.writeModel} onChange={(writeModel) => saveAi.mutate({ writeModel })} />
+          <ModelPick label="Sorting" free={!!settings?.ai.baseUrl} value={settings?.ai.classifyModel} onChange={(classifyModel) => saveAi.mutate({ classifyModel })}>
+            <EffortPick label="Sorting" value={settings?.ai.classifyEffort} onChange={(classifyEffort) => saveAi.mutate({ classifyEffort })} />
+          </ModelPick>
+          <ModelPick label="Summaries & drafts" free={!!settings?.ai.baseUrl} value={settings?.ai.writeModel} onChange={(writeModel) => saveAi.mutate({ writeModel })}>
+            <EffortPick label="Summaries & drafts" value={settings?.ai.writeEffort} onChange={(writeEffort) => saveAi.mutate({ writeEffort })} />
+          </ModelPick>
+          <p className="text-[12px] text-muted-foreground">
+            Higher effort thinks longer: slower answers, and more of your {settings?.ai.baseUrl ? "endpoint's tokens" : "Claude limits"}. Sorting runs in the
+            background on every new thread, so keep it on Default or Low.
+          </p>
         </div>
         <datalist id="tern-models">
           {MODELS.map((m) => (
@@ -403,41 +421,53 @@ function EndpointFields({ ai }: { ai: Settings["ai"] }) {
   );
 }
 
-function ModelPick({ label, value, free, onChange }: { label: string; value?: string; free?: boolean; onChange: (v: string) => void }) {
-  if (free)
-    return (
-      <label className="flex items-center gap-3 text-[13px]">
-        <span className="w-36 text-muted-foreground">{label}</span>
-        <Input
-          // keyed by the saved value, so a save (or a failed one) shows what the server holds
-          key={value}
-          defaultValue={value}
-          list="tern-models"
-          aria-label={`${label} model`}
-          placeholder="Model name, as your endpoint calls it"
-          className="h-8 flex-1"
-          onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== value && onChange(e.target.value.trim())}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        />
-      </label>
-    );
+const SELECT = "h-8 rounded-md border bg-transparent px-2 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 dark:bg-input/30";
+
+/** A model picker, with `children` (its effort picker) beside it. */
+function ModelPick({ label, value, free, onChange, children }: { label: string; value?: string; free?: boolean; onChange: (v: string) => void; children?: React.ReactNode }) {
   return (
-    <label className="flex items-center gap-3 text-[13px]">
-      <span className="w-36 text-muted-foreground">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-8 flex-1 rounded-md border bg-transparent px-2 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 dark:bg-input/30"
-      >
-        {/* a name typed in for an endpoint that's since been cleared */}
-        {value && !MODELS.some((m) => m.id === value) && <option value={value}>{value}</option>}
-        {MODELS.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="flex items-center gap-3 text-[13px]">
+      <label className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="w-36 shrink-0 text-muted-foreground">{label}</span>
+        {free ? (
+          <Input
+            // keyed by the saved value, so a save (or a failed one) shows what the server holds
+            key={value}
+            defaultValue={value}
+            list="tern-models"
+            aria-label={`${label} model`}
+            placeholder="Model name, as your endpoint calls it"
+            className="h-8 w-0 flex-1"
+            onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== value && onChange(e.target.value.trim())}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          />
+        ) : (
+          // w-0: a select is as wide as its longest option, which beside the effort would widen the dialog
+          <select value={value} onChange={(e) => onChange(e.target.value)} className={cn(SELECT, "w-0 flex-1")}>
+            {/* a name typed in for an endpoint that's since been cleared */}
+            {value && !MODELS.some((m) => m.id === value) && <option value={value}>{value}</option>}
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function EffortPick({ label, value, onChange }: { label: string; value?: Effort; onChange: (v: Effort | "") => void }) {
+  return (
+    <select aria-label={`${label} reasoning effort`} value={value ?? ""} onChange={(e) => onChange(e.target.value as Effort | "")} className={cn(SELECT, "w-36 shrink-0")}>
+      {EFFORTS.map((e) => (
+        <option key={e.id} value={e.id}>
+          {e.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

@@ -23,13 +23,18 @@ export type Settings = {
   redirectUri: string;
   ai: {
     enabled: boolean; classifyModel: string; writeModel: string; claudePath?: string;
+    /** Reasoning effort per model; unset is Default (none sent). */
+    classifyEffort?: Effort; writeEffort?: Effort;
     /** Your own Anthropic-compatible endpoint; unset means the Claude Code login. */
     baseUrl?: string; keyHeader?: KeyHeader; apiKeySet: boolean;
   };
 };
 export type KeyHeader = "x-api-key" | "bearer";
-/** What Settings › AI saves; `apiKey` goes to the server only, "" removes it. */
-export type AiPatch = Partial<Omit<Settings["ai"], "apiKeySet">> & { apiKey?: string };
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+/** What Settings › AI saves; `apiKey` goes to the server only, "" removes it, and "" sets an effort back to Default. */
+export type AiPatch = Partial<Omit<Settings["ai"], "apiKeySet" | "classifyEffort" | "writeEffort">> & {
+  apiKey?: string; classifyEffort?: Effort | ""; writeEffort?: Effort | "";
+};
 export type AiStatus = {
   enabled: boolean; claudePath: string | null; mode: "login" | "endpoint"; endpoint: string | null; busy: boolean; lastError: string | null;
   lastErrorCode: "signed_out" | "missing" | "rate_limited" | "failed" | null; classified: number;

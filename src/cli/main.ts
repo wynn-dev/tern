@@ -5,7 +5,7 @@ import { platform } from "node:os";
 
 import { parseArgs } from "node:util";
 import pkg from "../../package.json";
-import { dataDir, loadConfig, publicUrl, saveConfig, type Config } from "../server/config";
+import { dataDir, EFFORTS, type Effort, loadConfig, publicUrl, saveConfig, type Config } from "../server/config";
 import { seal } from "../server/crypto";
 import { binDir, installBinary, installedBin, logPath, service, writeUnit } from "./service";
 
@@ -195,7 +195,11 @@ function config(args: string[]) {
   const isKey = key === "ai.apiKey";
   if (value === undefined) return console.log(isKey ? (obj[last] ? "set" : "not set") : JSON.stringify(obj[last], null, 2));
   if (isKey) obj[last] = value ? seal(value) : undefined;
-  else obj[last] = value === "true" ? true : value === "false" ? false : /^\d+$/.test(value) ? Number(value) : value;
+  else if (key === "ai.classifyEffort" || key === "ai.writeEffort") {
+    // "" puts it back to the default: Tern sends no effort
+    if (value && !EFFORTS.includes(value as Effort)) fail(`${key} must be one of ${EFFORTS.join(", ")}, or "" for the default`);
+    obj[last] = value || undefined;
+  } else obj[last] = value === "true" ? true : value === "false" ? false : /^\d+$/.test(value) ? Number(value) : value;
   saveConfig(cfg as Config);
   ok(`${key} = ${isKey ? "•••" : value}${service.status().running ? c.dim("  (run `tern restart` to apply)") : ""}`);
 }
