@@ -26,7 +26,8 @@ const labelChange: Record<Action, [add: string[], remove: string[]]> = {
 export async function applyAction(accountId: string, threadId: string, action: Action, demo: boolean) {
   const [add, remove] = labelChange[action];
   const before = threadMessages(accountId, threadId);
-  const touched = action === "star" || action === "unstar" ? before.slice(-1) : before;
+  // Gmail stars messages, not threads: star the latest one, unstar every one (a thread is starred while any message is)
+  const touched = action === "star" ? before.slice(-1) : before;
   for (const m of touched) {
     const next = new Set(m.labels);
     add.forEach((l) => next.add(l));
@@ -38,8 +39,7 @@ export async function applyAction(accountId: string, threadId: string, action: A
   try {
     if (action === "trash") await gmail.trashThread(accountId, threadId);
     else if (action === "untrash") await gmail.untrashThread(accountId, threadId);
-    else if (action === "star" || action === "unstar") {
-      // Gmail stars messages, not threads: star the latest one
+    else if (action === "star") {
       const last = before.at(-1);
       if (last) await gmail.modifyMessage(accountId, last.id, add, remove);
     } else await gmail.modifyThread(accountId, threadId, add, remove);

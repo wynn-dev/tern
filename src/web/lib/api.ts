@@ -12,7 +12,11 @@ export type Message = {
   to: Address[]; cc: Address[]; subject: string; snippet: string; text: string; html: string; labels: string[];
   message_id: string; references: string; attachments: Attachment[];
 };
-export type Counts = { accounts: Record<string, { inboxUnread: number; needsReply: number }>; categories: Record<string, number> };
+/** `categories` counts every account; `accounts[id].categories` the same per account, for a scoped sidebar. */
+export type Counts = {
+  accounts: Record<string, { inboxUnread: number; needsReply: number; categories: Record<string, number> }>;
+  categories: Record<string, number>;
+};
 export type AccountsResponse = { accounts: Account[]; counts: Counts; labels: { account_id: string; id: string; name: string }[] };
 export type Settings = {
   google: { configured: boolean; clientId: string };

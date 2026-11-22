@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { classifyPending } from "./ai";
 import { createApp } from "./app";
-import { ensureDataDir, loadConfig } from "./config";
+import { ensureDataDir, loadConfig, setServeAddress } from "./config";
 import { openDb } from "./db";
 import { seedDemo } from "./demo";
 import { startSyncLoop } from "./sync";
@@ -24,6 +24,7 @@ export async function serve(opts: { demo?: boolean; port?: number; host?: string
   const port = opts.port ?? cfg.port;
   const hostname = opts.host ?? cfg.host;
   const server = Bun.serve({ port, hostname, fetch: app.fetch, idleTimeout: 0 });
+  setServeAddress({ hostname, port: server.port ?? port });
   console.log(`tern ${demo ? "(demo) " : ""}listening on http://${hostname}:${server.port}`);
 
   if (!demo) startSyncLoop(() => void classifyPending());
