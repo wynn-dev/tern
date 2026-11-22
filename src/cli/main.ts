@@ -213,7 +213,10 @@ async function doctor() {
     ok("ai: Claude answers on your subscription");
   } catch (e) {
     console.log();
-    warn(`ai: ${(e as Error).message}. Run \`claude\` once and sign in with your Claude account.`);
+    // ping() throws an AiError: a message to act on, plus what Claude Code printed
+    const { message, detail } = e as Error & { detail?: string };
+    warn(`ai: ${message}`);
+    if (detail) console.log(c.dim(`    ${detail}`));
   }
   console.log(c.dim(`log: ${logPath()}`));
 }

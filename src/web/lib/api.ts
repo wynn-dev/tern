@@ -19,7 +19,10 @@ export type Settings = {
   redirectUri: string;
   ai: { enabled: boolean; classifyModel: string; writeModel: string; claudePath?: string };
 };
-export type AiStatus = { enabled: boolean; claudePath: string | null; busy: boolean; lastError: string | null; classified: number };
+export type AiStatus = {
+  enabled: boolean; claudePath: string | null; busy: boolean; lastError: string | null;
+  lastErrorCode: "signed_out" | "missing" | "rate_limited" | "failed" | null; classified: number;
+};
 export type Action = "archive" | "inbox" | "star" | "unstar" | "read" | "unread" | "trash" | "untrash" | "spam" | "notspam";
 
 export class ApiError extends Error {

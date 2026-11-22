@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArchiveIcon, ArrowLeftIcon, CheckCircle2Icon, ChevronDownIcon, DownloadIcon, ForwardIcon, InboxIcon, Loader2Icon, MailIcon, MailOpenIcon,
   MoreHorizontalIcon, OctagonAlertIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, SparklesIcon, StarIcon, Trash2Icon, WandSparklesIcon,
@@ -73,7 +73,13 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
     return () => clearTimeout(t);
   }, [thread.thread_id, thread.unread]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const summary = useMutation({ mutationFn: () => api.summarize(thread.account_id, thread.thread_id) });
+  const qc = useQueryClient();
+  const { data: ai } = useQuery({ queryKey: ["ai-status"], queryFn: api.aiStatus });
+  // any AI call can change the status (a sign-in that lapsed, a rate limit): refresh the dot now, not at the next poll
+  const summary = useMutation({
+    mutationFn: () => api.summarize(thread.account_id, thread.thread_id),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["ai-status"] }),
+  });
   useEffect(() => summary.reset(), [thread.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const last = messages.at(-1)!;
@@ -145,7 +151,7 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
             <h2 className="flex-1 text-[20px] leading-snug font-semibold tracking-tight text-balance">{thread.subject || "(no subject)"}</h2>
           </div>
 
-          <AiCard thread={thread} summary={summary.data} loading={summary.isPending} error={summary.error?.message} onSummarize={() => summary.mutate()} />
+          <AiCard thread={thread} aiOn={!!ai?.enabled} summary={summary.data} loading={summary.isPending} error={summary.error?.message} onSummarize={() => summary.mutate()} />
 
           <div className="mt-5 space-y-2.5">
             {messages.map((m, i) => (
@@ -177,7 +183,7 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
             <Button variant="outline" onClick={() => openCompose(forwardDraft(thread, last))}>
               <ForwardIcon /> Forward <kbd className="ml-1">F</kbd>
             </Button>
-            <AiDraftButton thread={thread} messages={messages} me={account?.email} />
+            {ai?.enabled && <AiDraftButton thread={thread} messages={messages} me={account?.email} />}
           </div>
         </div>
       </div>
@@ -190,8 +196,8 @@ function initialExpanded(messages: Message[]) {
 }
 
 function AiCard({
-  thread, summary, loading, error, onSummarize,
-}: { thread: Thread; summary?: { summary: string; actions: string[] }; loading: boolean; error?: string; onSummarize: () => void }) {
+  thread, aiOn, summary, loading, error, onSummarize,
+}: { thread: Thread; aiOn: boolean; summary?: { summary: string; actions: string[] }; loading: boolean; error?: string; onSummarize: () => void }) {
   if (!thread.summary && !thread.category && !summary && !loading) return null;
   const color = categoryMeta(thread.category).color;
   return (
@@ -208,7 +214,7 @@ function AiCard({
           <span className="text-[11px] font-medium text-muted-foreground">{thread.priority === 3 ? "Act today" : "Soon"}</span>
         )}
         <div className="flex-1" />
-        {!summary && (
+        {aiOn && !summary && (
           <button onClick={onSummarize} disabled={loading} className="flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60">
             {loading ? <Loader2Icon className="size-3 animate-spin" /> : <WandSparklesIcon className="size-3" />}
             {loading ? "Reading the thread…" : "Summarize"}
@@ -345,6 +351,7 @@ function forwardDraft(thread: Thread, m: Message) {
 }
 
 function AiDraftButton({ thread, messages, me }: { thread: Thread; messages: Message[]; me?: string }) {
+  const qc = useQueryClient();
   const openCompose = useStore((s) => s.openCompose);
   const [asking, setAsking] = useState(false);
   const [instruction, setInstruction] = useState("");
@@ -356,6 +363,7 @@ function AiDraftButton({ thread, messages, me }: { thread: Thread; messages: Mes
       openCompose({ ...replyDraft(thread, messages, me, false), text: body });
     },
     onError: (e) => toast.error(e.message),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["ai-status"] }),
   });
 
   return (

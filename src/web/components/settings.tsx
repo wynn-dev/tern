@@ -69,7 +69,7 @@ function SettingsBody() {
   });
   const saveAi = useMutation({
     mutationFn: (ai: Parameters<typeof api.saveSettings>[0]["ai"]) => api.saveSettings({ ai }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["ai-status"] })]),
   });
 
   return (
@@ -131,11 +131,13 @@ function SettingsBody() {
             <div className="flex-1 text-[13px]">
               <div className="font-medium">Sort, summarize and draft with Claude</div>
               <div className="text-[12px] text-muted-foreground">
-                {!ai?.claudePath
-                  ? "Claude Code isn't installed on the server. Install it and run `claude` once to sign in."
-                  : ai.lastError
-                    ? `Last error: ${ai.lastError}`
-                    : `${ai.classified} conversations sorted since start`}
+                {settings && !settings.ai.enabled
+                  ? "Off. Tern sends nothing to Claude."
+                  : !ai?.claudePath
+                    ? "Claude Code isn't installed on the server. Install it and run `claude /login` to sign in."
+                    : ai.lastError
+                      ? `Last error: ${ai.lastError}`
+                      : `${ai.classified} conversations sorted since start`}
               </div>
             </div>
             <Toggle on={!!settings?.ai.enabled} onChange={(enabled) => saveAi.mutate({ enabled })} />
