@@ -101,7 +101,8 @@ export function keyHandler(get: () => Ctx) {
     const compose = async (draft: (t: { thread: Thread; messages: Message[] }) => Parameters<typeof s.openCompose>[0]) => {
       if (!current) return;
       const t = qc.getQueryData<{ thread: Thread; messages: Message[] }>(["thread", threadKey(current)]) ?? (await api.thread(current.account_id, current.thread_id));
-      s.openCompose(draft(t));
+      // nothing to reply to or forward
+      if (t.messages.length) s.openCompose(draft(t));
     };
     const me = () => accounts?.find((a) => a.id === current?.account_id)?.email;
 
@@ -115,7 +116,7 @@ export function keyHandler(get: () => Ctx) {
       Escape: () => s.select(null),
       e: () => removeAndAdvance("archive"),
       // out of Trash or Spam too, or it would stay stuck there
-      E: () => current && void act([current], current.in_trash ? "untrash" : current.in_spam ? "notspam" : "inbox"),
+      E: () => removeAndAdvance(current?.in_trash ? "untrash" : current?.in_spam ? "notspam" : "inbox"),
       "#": () => removeAndAdvance(current?.in_trash ? "untrash" : "trash"),
       "!": () => removeAndAdvance(current?.in_spam ? "notspam" : "spam"),
       s: () => current && void act([current], current.starred ? "unstar" : "star"),

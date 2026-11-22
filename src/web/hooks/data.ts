@@ -47,6 +47,10 @@ export function staysInView(view: string, action: Action) {
   return true;
 }
 
+/** "Move to inbox" on a trashed or spam thread restores it, as the server does: so it leaves Trash or Spam at once */
+const resolve = (t: Thread, action: Action): Action =>
+  action !== "inbox" ? action : t.in_trash ? "untrash" : t.in_spam ? "notspam" : action;
+
 function patch(t: Thread, action: Action): Thread {
   switch (action) {
     case "star": return { ...t, starred: 1 };
@@ -66,8 +70,12 @@ function patch(t: Thread, action: Action): Thread {
 const UNDO: Partial<Record<Action, Action>> = { archive: "inbox", trash: "untrash", untrash: "trash", spam: "notspam", notspam: "spam" };
 const VERB: Partial<Record<Action, string>> = { archive: "Archived", trash: "Moved to trash", untrash: "Restored", spam: "Marked as spam", notspam: "Moved to inbox" };
 
-/** The last action that can be undone, for `z`; the toast's Undo button and `z` run the same thing, once. */
+/**
+ * The undo of the most recent action, for `z`, while its toast shows; the toast's Undo button and `z` run the same thing, once.
+ * Any later action, undoable or not, replaces it: `z` never reaches past the last thing done.
+ */
 let lastUndo: (() => void) | null = null;
+let lastAction = 0;
 export function undoLast() {
   const undo = lastUndo;
   lastUndo = null;
@@ -80,6 +88,11 @@ export const useActions = () => makeActions(useQueryClient());
 export function makeActions(qc: QueryClient) {
   return async function act(threads: Thread[], action: Action, opts: { quiet?: boolean } = {}) {
     const { view } = useStore.getState();
+    const actions = new Set(threads.map((t) => resolve(t, action)));
+    if (actions.size === 1) action = [...actions][0];
+    // marking read on open is quiet: it doesn't count as something done
+    const seq = opts.quiet ? 0 : ++lastAction;
+    if (seq) lastUndo = null;
     const keys = new Set(threads.map(threadKey));
     const snapshot = qc.getQueriesData<InfiniteData<Page>>({ queryKey: ["threads"] });
 
@@ -90,23 +103,33 @@ export function makeActions(qc: QueryClient) {
         ...data,
         pages: data.pages.map((p) => ({
           ...p,
-          threads: p.threads.flatMap((t) => (!keys.has(threadKey(t)) ? [t] : staysInView(view, action) ? [patch(t, action)] : [])),
+          threads: p.threads.flatMap((t) => {
+            if (!keys.has(threadKey(t))) return [t];
+            const a = resolve(t, action);
+            return staysInView(view, a) ? [patch(t, a)] : [];
+          }),
         })),
       };
     });
-    for (const t of threads) qc.setQueryData<{ thread: Thread }>(["thread", threadKey(t)], (d) => (d ? { ...d, thread: patch(d.thread, action) } : d));
+    for (const t of threads) qc.setQueryData<{ thread: Thread }>(["thread", threadKey(t)], (d) => (d ? { ...d, thread: patch(d.thread, resolve(d.thread, action)) } : d));
 
     try {
-      await Promise.all(threads.map((t) => api.act(t.account_id, t.thread_id, action)));
+      await Promise.all(threads.map((t) => api.act(t.account_id, t.thread_id, resolve(t, action))));
       const undo = UNDO[action];
-      if (undo && !opts.quiet) {
+      // an action started since then has answered first: it is the one `z` undoes
+      if (undo && seq && seq === lastAction) {
         const run = () => {
           if (lastUndo === run) lastUndo = null;
           void act(threads, undo, { quiet: true });
           toast.dismiss(id);
         };
+        const forget = () => {
+          if (lastUndo === run) lastUndo = null;
+        };
         const id = toast(VERB[action] + (threads.length > 1 ? ` ${threads.length} conversations` : ""), {
           action: { label: "Undo", onClick: run },
+          onDismiss: forget,
+          onAutoClose: forget,
         });
         lastUndo = run;
       }
