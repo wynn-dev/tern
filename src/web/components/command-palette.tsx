@@ -1,15 +1,16 @@
-import { Command } from "cmdk";
+import { useQueryClient } from "@tanstack/react-query";
+import { Command, defaultFilter } from "cmdk";
 import {
-  ArchiveIcon, InboxIcon, KeyboardIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, RefreshCwIcon, ReplyIcon, SearchIcon, SendIcon, SettingsIcon,
-  StarIcon, TagIcon, Trash2Icon,
+  ArchiveIcon, CheckIcon, InboxIcon, KeyboardIcon, MonitorIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, RefreshCwIcon, ReplyIcon, SearchIcon,
+  SendIcon, SettingsIcon, StarIcon, SunIcon, TagIcon, Trash2Icon,
 } from "lucide-react";
 import { Dialog as D } from "radix-ui";
 import { useState } from "react";
 import { useAccounts } from "@/hooks/data";
-import { useTheme } from "@/hooks/theme";
-import { api } from "@/lib/api";
+import { type ThemePref, useTheme } from "@/hooks/theme";
 import { useStore } from "@/lib/store";
 import { CATEGORY } from "./bits";
+import { checkForMail } from "./settings";
 
 const VIEWS = [
   { view: "inbox", label: "Inbox", icon: InboxIcon },
@@ -21,10 +22,26 @@ const VIEWS = [
   { view: "trash", label: "Trash", icon: Trash2Icon },
 ];
 
+const THEMES: { pref: ThemePref; label: string; icon: typeof SunIcon; keywords: string[] }[] = [
+  { pref: "light", label: "Light theme", icon: SunIcon, keywords: ["light mode"] },
+  { pref: "dark", label: "Dark theme", icon: MoonIcon, keywords: ["dark mode", "toggle dark mode"] },
+  { pref: "system", label: "System theme", icon: MonitorIcon, keywords: ["match system", "automatic"] },
+];
+
+export const SEARCH_ITEM = "search all mail";
+/**
+ * cmdk's own ranking, with "Search all mail" always shown but below every command that
+ * matches as a word or prefix ("settings", "dark", "inbox"), so Enter runs the command.
+ * Loose letter-by-letter matches (around 0.15) still rank below it.
+ */
+export const paletteFilter = (value: string, search: string, keywords?: string[]) =>
+  value === SEARCH_ITEM ? 0.5 : defaultFilter(value, search, keywords);
+
 export function CommandPalette() {
+  const qc = useQueryClient();
   const { paletteOpen, set, setView, setQuery, openCompose } = useStore();
   const { data } = useAccounts();
-  const { toggle } = useTheme();
+  const { pref, setPref } = useTheme();
   const [search, setSearch] = useState("");
   const run = (fn: () => void) => () => {
     set({ paletteOpen: false });
@@ -41,7 +58,7 @@ export function CommandPalette() {
           className="fixed top-[18%] left-1/2 z-50 w-[580px] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border bg-popover shadow-2xl duration-150 ease-(--ease-snap) data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.97] data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.97]"
         >
           <D.Title className="sr-only">Command menu</D.Title>
-          <Command loop className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
+          <Command loop filter={paletteFilter} className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
             <div className="flex items-center gap-2.5 border-b px-4">
               <SearchIcon className="size-4 text-muted-foreground" />
               <Command.Input
@@ -54,24 +71,19 @@ export function CommandPalette() {
             <Command.List className="scroll-thin max-h-[360px] overflow-y-auto p-1.5 [&_[cmdk-item]]:flex [&_[cmdk-item]]:h-9 [&_[cmdk-item]]:cursor-default [&_[cmdk-item]]:items-center [&_[cmdk-item]]:gap-2.5 [&_[cmdk-item]]:rounded-md [&_[cmdk-item]]:px-2.5 [&_[cmdk-item]]:text-[13px] [&_[cmdk-item]_svg]:size-4 [&_[cmdk-item]_svg]:text-muted-foreground [&_[cmdk-item][data-selected=true]]:bg-accent">
               <Command.Empty className="py-8 text-center text-[13px] text-muted-foreground">Nothing matches</Command.Empty>
               {search.trim() && (
-                <Command.Group heading="Search">
-                  <Command.Item value={`search ${search}`} onSelect={run(() => (setView("all"), setQuery(search)))}>
-                    <SearchIcon /> Search all mail for “{search}”
-                  </Command.Item>
-                </Command.Group>
+                <Command.Item value={SEARCH_ITEM} onSelect={run(() => (setView("all"), setQuery(search)))}>
+                  <SearchIcon /> Search all mail for “{search}”
+                </Command.Item>
               )}
-              <Command.Group heading="Actions">
+              <Group searching={!!search} heading="Actions">
                 <Command.Item onSelect={run(() => openCompose())}>
                   <PenSquareIcon /> New message <Kbd k="C" />
                 </Command.Item>
-                <Command.Item onSelect={run(() => data?.accounts.forEach((a) => void api.sync(a.id)))}>
+                <Command.Item onSelect={run(() => checkForMail(data?.accounts ?? [], qc))}>
                   <RefreshCwIcon /> Check for new mail
                 </Command.Item>
                 <Command.Item onSelect={run(() => set({ settingsOpen: true }))}>
                   <PlusIcon /> Add a Gmail account
-                </Command.Item>
-                <Command.Item onSelect={run(toggle)}>
-                  <MoonIcon /> Toggle dark mode
                 </Command.Item>
                 <Command.Item onSelect={run(() => set({ settingsOpen: true }))}>
                   <SettingsIcon /> Settings <Kbd k="," />
@@ -79,8 +91,15 @@ export function CommandPalette() {
                 <Command.Item onSelect={run(() => set({ helpOpen: true }))}>
                   <KeyboardIcon /> Keyboard shortcuts <Kbd k="?" />
                 </Command.Item>
-              </Command.Group>
-              <Command.Group heading="Go to">
+              </Group>
+              <Group searching={!!search} heading="Theme">
+                {THEMES.map((t) => (
+                  <Command.Item key={t.pref} value={t.label} keywords={t.keywords} onSelect={run(() => setPref(t.pref))}>
+                    <t.icon /> {t.label} {pref === t.pref && <CheckIcon className="ml-auto" />}
+                  </Command.Item>
+                ))}
+              </Group>
+              <Group searching={!!search} heading="Go to">
                 {VIEWS.map((v) => (
                   <Command.Item key={v.view} value={`go ${v.label}`} onSelect={run(() => setView(v.view))}>
                     <v.icon /> {v.label}
@@ -96,9 +115,9 @@ export function CommandPalette() {
                     <TagIcon /> {name}
                   </Command.Item>
                 ))}
-              </Command.Group>
+              </Group>
               {!!data?.accounts.length && (
-                <Command.Group heading="Accounts">
+                <Group searching={!!search} heading="Accounts">
                   <Command.Item value="account all" onSelect={run(() => setView(useStore.getState().view, null))}>
                     <InboxIcon /> All accounts
                   </Command.Item>
@@ -107,7 +126,7 @@ export function CommandPalette() {
                       <span className="mx-[5px] size-1.5 rounded-full" style={{ background: a.color }} /> {a.email}
                     </Command.Item>
                   ))}
-                </Command.Group>
+                </Group>
               )}
             </Command.List>
           </Command>
@@ -116,5 +135,12 @@ export function CommandPalette() {
     </D.Root>
   );
 }
+
+/**
+ * A headed group, or while searching just its items: cmdk ranks the items of a group only among
+ * themselves and never reorders groups, so Enter would run the first group's best match, not the best one.
+ */
+const Group = ({ searching, heading, children }: { searching: boolean; heading: string; children: React.ReactNode }) =>
+  searching ? children : <Command.Group heading={heading}>{children}</Command.Group>;
 
 const Kbd = ({ k }: { k: string }) => <kbd className="ml-auto">{k}</kbd>;

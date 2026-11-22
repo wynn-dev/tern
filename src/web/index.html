@@ -7,9 +7,9 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Tern</title>
     <script>
-      // apply the theme before first paint so there's no flash
-      const t = localStorage.getItem("tern-theme") || "system";
-      if (t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.classList.add("dark");
+      // apply the theme before first paint so there's no flash (the same rule as readPref in hooks/theme.ts)
+      const t = localStorage.getItem("tern-theme");
+      if (t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.classList.add("dark");
     </script>
   </head>
   <body>
