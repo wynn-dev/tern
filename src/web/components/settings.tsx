@@ -1,5 +1,5 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon, PlusIcon, RefreshCwIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { useAccounts } from "@/hooks/data";
 import { type ThemePref, useTheme } from "@/hooks/theme";
@@ -164,7 +164,6 @@ function SettingsBody() {
       >
         <div className="space-y-3 rounded-lg border p-3">
           <div className="flex items-center gap-3">
-            <SparklesIcon className="size-4 text-brand" />
             <div className="flex-1 text-[13px]">
               <div className="font-medium">Sort, summarize and draft with Claude</div>
               <div className="text-[12px] text-muted-foreground">

@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArchiveIcon, InboxIcon, Loader2Icon, MonitorIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, ReplyIcon, SendIcon, SettingsIcon, SparklesIcon,
-  StarIcon, SunIcon, TagIcon, Trash2Icon, AlertCircleIcon, HourglassIcon,
+  Loader2Icon, MonitorIcon, MoonIcon, PenSquareIcon, PlusIcon, SettingsIcon, SunIcon, AlertCircleIcon, HourglassIcon,
 } from "lucide-react";
 import { useMemo } from "react";
 import { motion } from "motion/react";
@@ -17,13 +16,13 @@ import { IconButton } from "./ui/icon-button";
 import { Tooltip } from "./ui/tooltip";
 
 const NAV = [
-  { view: "inbox", label: "Inbox", icon: InboxIcon, kbd: "G I" },
-  { view: "needs-reply", label: "Needs reply", icon: ReplyIcon, kbd: "G R" },
-  { view: "starred", label: "Starred", icon: StarIcon, kbd: "G S" },
-  { view: "sent", label: "Sent", icon: SendIcon, kbd: "G T" },
-  { view: "all", label: "All mail", icon: ArchiveIcon, kbd: "G A" },
-  { view: "spam", label: "Spam", icon: OctagonAlertIcon, kbd: "G !" },
-  { view: "trash", label: "Trash", icon: Trash2Icon, kbd: "G #" },
+  { view: "inbox", label: "Inbox", kbd: "G I" },
+  { view: "needs-reply", label: "Needs reply", kbd: "G R" },
+  { view: "starred", label: "Starred", kbd: "G S" },
+  { view: "sent", label: "Sent", kbd: "G T" },
+  { view: "all", label: "All mail", kbd: "G A" },
+  { view: "spam", label: "Spam", kbd: "G !" },
+  { view: "trash", label: "Trash", kbd: "G #" },
 ];
 
 const THEME: Record<ThemePref, { label: string; icon: typeof SunIcon }> = {
@@ -91,20 +90,16 @@ export function Sidebar() {
               onClick={() => setView(n.view)}
               count={n.view === "inbox" ? scoped.inboxUnread : n.view === "needs-reply" ? scoped.needsReply : undefined}
             >
-              <n.icon />
               {n.label}
             </Item>
           ))}
         </div>
 
         <div>
-          <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
-            <SparklesIcon className="size-3" /> Smart views
-          </div>
+          <div className="mb-1 px-2 text-[11px] font-medium text-muted-foreground">Smart views</div>
           <div className="space-y-px">
             {Object.entries(CATEGORY).map(([key, c]) => (
               <Item key={key} active={view === `category:${key}`} onClick={() => setView(`category:${key}`)} count={scoped.categories[key]}>
-                <c.icon style={{ color: c.color }} />
                 {c.label}
               </Item>
             ))}
@@ -113,13 +108,10 @@ export function Sidebar() {
 
         {!!labels.length && (
           <div>
-            <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
-              <TagIcon className="size-3" /> Labels
-            </div>
+            <div className="mb-1 px-2 text-[11px] font-medium text-muted-foreground">Labels</div>
             <div className="space-y-px">
               {labels.map((name) => (
                 <Item key={name} active={view === `label:${name}`} onClick={() => setView(`label:${name}`)}>
-                  <TagIcon />
                   <span className="truncate">{name}</span>
                 </Item>
               ))}

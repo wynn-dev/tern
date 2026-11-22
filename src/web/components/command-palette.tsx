@@ -1,9 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Command, defaultFilter } from "cmdk";
-import {
-  ArchiveIcon, CheckIcon, InboxIcon, KeyboardIcon, MonitorIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, RefreshCwIcon, ReplyIcon, SearchIcon,
-  SendIcon, SettingsIcon, StarIcon, SunIcon, TagIcon, Trash2Icon,
-} from "lucide-react";
+import { CheckIcon, SearchIcon } from "lucide-react";
 import { Dialog as D } from "radix-ui";
 import { useState } from "react";
 import { useAccounts } from "@/hooks/data";
@@ -13,19 +10,19 @@ import { CATEGORY } from "./bits";
 import { checkForMail } from "./settings";
 
 const VIEWS = [
-  { view: "inbox", label: "Inbox", icon: InboxIcon },
-  { view: "needs-reply", label: "Needs reply", icon: ReplyIcon },
-  { view: "starred", label: "Starred", icon: StarIcon },
-  { view: "sent", label: "Sent", icon: SendIcon },
-  { view: "all", label: "All mail", icon: ArchiveIcon },
-  { view: "spam", label: "Spam", icon: OctagonAlertIcon },
-  { view: "trash", label: "Trash", icon: Trash2Icon },
+  { view: "inbox", label: "Inbox" },
+  { view: "needs-reply", label: "Needs reply" },
+  { view: "starred", label: "Starred" },
+  { view: "sent", label: "Sent" },
+  { view: "all", label: "All mail" },
+  { view: "spam", label: "Spam" },
+  { view: "trash", label: "Trash" },
 ];
 
-const THEMES: { pref: ThemePref; label: string; icon: typeof SunIcon; keywords: string[] }[] = [
-  { pref: "light", label: "Light theme", icon: SunIcon, keywords: ["light mode"] },
-  { pref: "dark", label: "Dark theme", icon: MoonIcon, keywords: ["dark mode", "toggle dark mode"] },
-  { pref: "system", label: "System theme", icon: MonitorIcon, keywords: ["match system", "automatic"] },
+const THEMES: { pref: ThemePref; label: string; keywords: string[] }[] = [
+  { pref: "light", label: "Light theme", keywords: ["light mode"] },
+  { pref: "dark", label: "Dark theme", keywords: ["dark mode", "toggle dark mode"] },
+  { pref: "system", label: "System theme", keywords: ["match system", "automatic"] },
 ];
 
 export const SEARCH_ITEM = "search all mail";
@@ -72,58 +69,58 @@ export function CommandPalette() {
               <Command.Empty className="py-8 text-center text-[13px] text-muted-foreground">Nothing matches</Command.Empty>
               {search.trim() && (
                 <Command.Item value={SEARCH_ITEM} onSelect={run(() => (setView("all"), setQuery(search)))}>
-                  <SearchIcon /> Search all mail for “{search}”
+                  Search all mail for “{search}”
                 </Command.Item>
               )}
               <Group searching={!!search} heading="Actions">
                 <Command.Item onSelect={run(() => openCompose())}>
-                  <PenSquareIcon /> New message <Kbd k="C" />
+                  New message <Kbd k="C" />
                 </Command.Item>
                 <Command.Item onSelect={run(() => checkForMail(data?.accounts ?? [], qc))}>
-                  <RefreshCwIcon /> Check for new mail
+                  Check for new mail
                 </Command.Item>
                 <Command.Item onSelect={run(() => set({ settingsOpen: true }))}>
-                  <PlusIcon /> Add a Gmail account
+                  Add a Gmail account
                 </Command.Item>
                 <Command.Item onSelect={run(() => set({ settingsOpen: true }))}>
-                  <SettingsIcon /> Settings <Kbd k="," />
+                  Settings <Kbd k="," />
                 </Command.Item>
                 <Command.Item onSelect={run(() => set({ helpOpen: true }))}>
-                  <KeyboardIcon /> Keyboard shortcuts <Kbd k="?" />
+                  Keyboard shortcuts <Kbd k="?" />
                 </Command.Item>
               </Group>
               <Group searching={!!search} heading="Theme">
                 {THEMES.map((t) => (
                   <Command.Item key={t.pref} value={t.label} keywords={t.keywords} onSelect={run(() => setPref(t.pref))}>
-                    <t.icon /> {t.label} {pref === t.pref && <CheckIcon className="ml-auto" />}
+                    {t.label} {pref === t.pref && <CheckIcon className="ml-auto" />}
                   </Command.Item>
                 ))}
               </Group>
               <Group searching={!!search} heading="Go to">
                 {VIEWS.map((v) => (
                   <Command.Item key={v.view} value={`go ${v.label}`} onSelect={run(() => setView(v.view))}>
-                    <v.icon /> {v.label}
+                    {v.label}
                   </Command.Item>
                 ))}
                 {Object.entries(CATEGORY).map(([k, c]) => (
                   <Command.Item key={k} value={`go smart ${c.label}`} onSelect={run(() => setView(`category:${k}`))}>
-                    <c.icon style={{ color: c.color }} /> {c.label}
+                    {c.label}
                   </Command.Item>
                 ))}
                 {[...new Set(data?.labels.map((l) => l.name))].map((name) => (
                   <Command.Item key={name} value={`go label ${name}`} onSelect={run(() => setView(`label:${name}`))}>
-                    <TagIcon /> {name}
+                    {name}
                   </Command.Item>
                 ))}
               </Group>
               {!!data?.accounts.length && (
                 <Group searching={!!search} heading="Accounts">
                   <Command.Item value="account all" onSelect={run(() => setView(useStore.getState().view, null))}>
-                    <InboxIcon /> All accounts
+                    All accounts
                   </Command.Item>
                   {data.accounts.map((a) => (
                     <Command.Item key={a.id} value={`account ${a.email}`} onSelect={run(() => setView(useStore.getState().view, a.id))}>
-                      <span className="mx-[5px] size-1.5 rounded-full" style={{ background: a.color }} /> {a.email}
+                      {a.email} <span className="ml-auto size-1.5 rounded-full" style={{ background: a.color }} />
                     </Command.Item>
                   ))}
                 </Group>
