@@ -51,6 +51,7 @@ const Row = memo(function Row({
   });
   return (
     <button
+      data-thread={threadKey(t)}
       onClick={onSelect}
       onMouseEnter={onHover}
       className={cn(

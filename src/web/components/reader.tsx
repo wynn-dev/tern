@@ -116,7 +116,7 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
           </Tooltip>
         )}
         {thread.in_trash ? (
-          <Tooltip label="Restore">
+          <Tooltip label="Restore" kbd="#">
             <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "untrash")}>
               <Undo2Icon />
             </Button>

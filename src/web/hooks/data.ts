@@ -37,8 +37,10 @@ export function prefetchThread(qc: QueryClient, t: Thread) {
 }
 
 /** Does `t` still belong in `view` after this action? */
-function staysInView(view: string, action: Action) {
-  if (action === "archive" || action === "trash" || action === "spam") return (view === "all" || view.startsWith("label:")) && action === "archive";
+export function staysInView(view: string, action: Action) {
+  // archiving only takes it out of the inbox: Starred, Sent and labels still show it
+  if (action === "archive") return view === "all" || view === "starred" || view === "sent" || view.startsWith("label:");
+  if (action === "trash" || action === "spam") return false;
   if (action === "unstar") return view !== "starred";
   if (action === "untrash") return view !== "trash";
   if (action === "notspam") return view !== "spam";
@@ -61,12 +63,21 @@ function patch(t: Thread, action: Action): Thread {
   }
 }
 
-const UNDO: Partial<Record<Action, Action>> = { archive: "inbox", trash: "untrash", spam: "notspam", notspam: "spam" };
-const VERB: Partial<Record<Action, string>> = { archive: "Archived", trash: "Moved to trash", spam: "Marked as spam", notspam: "Moved to inbox" };
+const UNDO: Partial<Record<Action, Action>> = { archive: "inbox", trash: "untrash", untrash: "trash", spam: "notspam", notspam: "spam" };
+const VERB: Partial<Record<Action, string>> = { archive: "Archived", trash: "Moved to trash", untrash: "Restored", spam: "Marked as spam", notspam: "Moved to inbox" };
 
-export function useActions() {
-  const qc = useQueryClient();
+/** The last action that can be undone, for `z`; the toast's Undo button and `z` run the same thing, once. */
+let lastUndo: (() => void) | null = null;
+export function undoLast() {
+  const undo = lastUndo;
+  lastUndo = null;
+  undo?.();
+  return !!undo;
+}
 
+export const useActions = () => makeActions(useQueryClient());
+
+export function makeActions(qc: QueryClient) {
   return async function act(threads: Thread[], action: Action, opts: { quiet?: boolean } = {}) {
     const { view } = useStore.getState();
     const keys = new Set(threads.map(threadKey));
@@ -88,10 +99,17 @@ export function useActions() {
     try {
       await Promise.all(threads.map((t) => api.act(t.account_id, t.thread_id, action)));
       const undo = UNDO[action];
-      if (undo && !opts.quiet)
-        toast(VERB[action] + (threads.length > 1 ? ` ${threads.length} conversations` : ""), {
-          action: { label: "Undo", onClick: () => void act(threads, undo, { quiet: true }) },
+      if (undo && !opts.quiet) {
+        const run = () => {
+          if (lastUndo === run) lastUndo = null;
+          void act(threads, undo, { quiet: true });
+          toast.dismiss(id);
+        };
+        const id = toast(VERB[action] + (threads.length > 1 ? ` ${threads.length} conversations` : ""), {
+          action: { label: "Undo", onClick: run },
         });
+        lastUndo = run;
+      }
     } catch (e) {
       for (const [k, v] of snapshot) qc.setQueryData(k, v);
       // a 401 already took them to sign-in
