@@ -154,6 +154,22 @@ function migrate() {
       PRIMARY KEY (account_id, id)
     );
 
+    -- threads you cleared in Tern, per local day: read while unread in the inbox, or taken out of it
+    CREATE TABLE IF NOT EXISTS triage_threads (
+      day TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      read INTEGER NOT NULL DEFAULT 0,
+      removed TEXT,
+      PRIMARY KEY (day, account_id, thread_id)
+    );
+    -- the days you reached zero unread in the inbox: per account, and '' for All accounts
+    CREATE TABLE IF NOT EXISTS zero_days (
+      scope TEXT NOT NULL,
+      day TEXT NOT NULL,
+      PRIMARY KEY (scope, day)
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       created_at INTEGER NOT NULL
@@ -209,6 +225,8 @@ export function updateAccount(id: string, patch: Partial<Pick<Account, "token" |
 export function deleteAccount(id: string) {
   db.transaction(() => {
     db.query("DELETE FROM messages WHERE account_id = ?").run(id);
+    db.query("DELETE FROM triage_threads WHERE account_id = ?").run(id);
+    db.query("DELETE FROM zero_days WHERE scope = ?").run(id);
     db.query("DELETE FROM accounts WHERE id = ?").run(id);
   })();
 }
@@ -410,7 +428,8 @@ export function threadMessages(accountId: string, threadId: string): Message[] {
 }
 
 export type Counts = {
-  accounts: Record<string, { inboxUnread: number; needsReply: number; categories: Record<string, number> }>;
+  /** `inbox` is every thread in the inbox, read or not: zero is inbox zero. */
+  accounts: Record<string, { inbox: number; inboxUnread: number; needsReply: number; categories: Record<string, number> }>;
   /** Unread per smart view across all accounts; each account's own are in `accounts[id].categories`. */
   categories: Record<string, number>;
 };
@@ -418,16 +437,17 @@ export type Counts = {
 export function counts(): Counts {
   const rows = db.query(`
     SELECT account_id,
+      SUM(CASE WHEN in_inbox = 1 AND in_trash = 0 AND in_spam = 0 THEN 1 ELSE 0 END) AS inbox,
       SUM(CASE WHEN in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND unread = 1 THEN 1 ELSE 0 END) AS inbox_unread,
       SUM(CASE WHEN in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND needs_reply = 1 THEN 1 ELSE 0 END) AS needs_reply
     FROM threads GROUP BY account_id
-  `).all() as { account_id: string; inbox_unread: number; needs_reply: number }[];
+  `).all() as { account_id: string; inbox: number; inbox_unread: number; needs_reply: number }[];
   const cats = db.query(`
     SELECT account_id, category, COUNT(*) AS n FROM threads
     WHERE category IS NOT NULL AND in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND unread = 1 GROUP BY account_id, category
   `).all() as { account_id: string; category: string; n: number }[];
   const out: Counts = {
-    accounts: Object.fromEntries(rows.map((r) => [r.account_id, { inboxUnread: r.inbox_unread, needsReply: r.needs_reply, categories: {} }])),
+    accounts: Object.fromEntries(rows.map((r) => [r.account_id, { inbox: r.inbox, inboxUnread: r.inbox_unread, needsReply: r.needs_reply, categories: {} }])),
     categories: {},
   };
   for (const c of cats) {

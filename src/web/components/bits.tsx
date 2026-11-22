@@ -1,5 +1,20 @@
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { hue, initials } from "@/lib/format";
+
+/**
+ * A count that rolls to its new value: down as it falls, up as it climbs. CSS only, and the new number is
+ * there at once, so a count never lags what you did.
+ */
+export function Ticker({ value, className }: { value: number; className?: string }) {
+  const last = useRef<{ value: number; dir: "down" | "up" | null }>({ value, dir: null });
+  if (last.current.value !== value) last.current = { value, dir: value < last.current.value ? "down" : "up" };
+  return (
+    <span className={cn("ticker", className)}>
+      <span key={value} className={last.current.dir ? `ticker-${last.current.dir}` : undefined}>{value}</span>
+    </span>
+  );
+}
 
 export function Avatar({ person, size = 32, className }: { person: { name: string; email: string }; size?: number; className?: string }) {
   const h = hue(person.email);

@@ -1,16 +1,17 @@
 import type { Counts } from "./api";
 
-export type ScopedCounts = { inboxUnread: number; needsReply: number; categories: Record<string, number> };
+export type ScopedCounts = { inbox: number; inboxUnread: number; needsReply: number; categories: Record<string, number> };
 
 /** The sidebar's counts for one account, or summed over all of them when `account` is null. */
 export function scopedCounts(counts: Counts | undefined, account: string | null): ScopedCounts {
-  if (!counts) return { inboxUnread: 0, needsReply: 0, categories: {} };
+  if (!counts) return { inbox: 0, inboxUnread: 0, needsReply: 0, categories: {} };
   if (account) {
     const c = counts.accounts[account];
-    return { inboxUnread: c?.inboxUnread ?? 0, needsReply: c?.needsReply ?? 0, categories: c?.categories ?? {} };
+    return { inbox: c?.inbox ?? 0, inboxUnread: c?.inboxUnread ?? 0, needsReply: c?.needsReply ?? 0, categories: c?.categories ?? {} };
   }
   const all = Object.values(counts.accounts);
   return {
+    inbox: all.reduce((n, c) => n + (c.inbox ?? 0), 0),
     inboxUnread: all.reduce((n, c) => n + c.inboxUnread, 0),
     needsReply: all.reduce((n, c) => n + c.needsReply, 0),
     categories: counts.categories,

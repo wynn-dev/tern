@@ -12,9 +12,12 @@ export type Message = {
   to: Address[]; cc: Address[]; subject: string; snippet: string; text: string; html: string; labels: string[];
   message_id: string; references: string; attachments: Attachment[];
 };
-/** `categories` counts every account; `accounts[id].categories` the same per account, for a scoped sidebar. */
+/**
+ * `categories` counts every account; `accounts[id].categories` the same per account, for a scoped sidebar.
+ * `inbox` is every thread in the inbox, read or not.
+ */
 export type Counts = {
-  accounts: Record<string, { inboxUnread: number; needsReply: number; categories: Record<string, number> }>;
+  accounts: Record<string, { inbox: number; inboxUnread: number; needsReply: number; categories: Record<string, number> }>;
   categories: Record<string, number>;
 };
 export type AccountsResponse = { accounts: Account[]; counts: Counts; labels: { account_id: string; id: string; name: string }[] };
@@ -28,6 +31,17 @@ export type Settings = {
     /** Your own Anthropic-compatible endpoint; unset means the Claude Code login. */
     baseUrl?: string; keyHeader?: KeyHeader; apiKeySet: boolean;
   };
+};
+/** What you cleared in Tern, for one account or All accounts: see src/server/stats.ts. */
+export type Stats = {
+  today: string;
+  /** Threads cleared today: read while unread in the inbox, or taken out of it. */
+  cleared: number;
+  /** Reached zero unread in the inbox today. */
+  zeroToday: boolean;
+  /** Days in a row at zero unread, today included once reached. */
+  streak: number;
+  days: { day: string; read: number; archived: number; trashed: number; spammed: number; cleared: number; zero: boolean }[];
 };
 export type KeyHeader = "x-api-key" | "bearer";
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -98,7 +112,9 @@ export const api = {
     return req<{ threads: Thread[]; next: string | null }>("GET", `/api/threads?${s}`);
   },
   thread: (account: string, thread: string) => req<{ thread: Thread; messages: Message[] }>("GET", `/api/threads/${account}/${thread}`),
-  act: (account: string, thread: string, action: Action) => req("POST", `/api/threads/${account}/${thread}/${action}`),
+  /** `undo`: it takes back the action before it, so that one stops counting toward the day's stats. */
+  act: (account: string, thread: string, action: Action, undo = false) => req("POST", `/api/threads/${account}/${thread}/${action}${undo ? "?undo=1" : ""}`),
+  stats: (account: string | null) => req<Stats>("GET", `/api/stats${account ? `?account=${encodeURIComponent(account)}` : ""}`),
   send: (m: { accountId: string; to: string; cc?: string; bcc?: string; subject: string; text: string; threadId?: string }) =>
     req<{ id: string; threadId: string }>("POST", "/api/send", m),
   aiStatus: () => req<AiStatus>("GET", "/api/ai/status"),

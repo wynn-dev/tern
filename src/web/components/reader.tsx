@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { Avatar, CategoryChip, categoryMeta } from "./bits";
 import { EmailFrame } from "./email-frame";
+import { useInboxZero, ZeroPane } from "./inbox-zero";
 import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
 import { IconButton } from "./ui/icon-button";
@@ -22,12 +23,13 @@ import { Tooltip } from "./ui/tooltip";
 export function Reader() {
   const selected = useStore((s) => s.selected);
   const { data, isLoading, error, isFetching, refetch } = useThread(selected);
+  const { zero } = useInboxZero();
   return (
     <main className="relative flex min-w-0 flex-1 flex-col bg-background">
       <AnimatePresence mode="popLayout" initial={false}>
         {!selected ? (
-          <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className="flex flex-1 items-center justify-center">
-            <NothingOpen />
+          <motion.div key={zero ? "zero" : "empty"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className="flex flex-1 items-center justify-center">
+            {zero ? <ZeroPane /> : <NothingOpen />}
           </motion.div>
         ) : error && !data ? (
           <LoadError key="error" title="Couldn't open this conversation" error={error} retrying={isFetching} onRetry={() => void refetch()} className="flex-1" />

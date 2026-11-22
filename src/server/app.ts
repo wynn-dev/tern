@@ -11,6 +11,7 @@ import { randomId, seal, sign, verify } from "./crypto";
 import * as db from "./db";
 import { events } from "./events";
 import { authUrl, exchangeCode, gmail, redirectUri } from "./gmail";
+import { stats } from "./stats";
 import { syncAccount, syncSoon } from "./sync";
 
 export type AppOptions = { demo: boolean; assets?: Record<string, string> };
@@ -190,9 +191,12 @@ export function createApp(opts: AppOptions) {
     const action = c.req.param("action") as Action;
     if (!ACTIONS.includes(action)) throw fail(400, "Unknown action");
     needThread(c.req.param("account"), c.req.param("thread"));
-    await applyAction(c.req.param("account"), c.req.param("thread"), action, opts.demo);
+    await applyAction(c.req.param("account"), c.req.param("thread"), action, opts.demo, c.req.query("undo") === "1");
     return c.json({ ok: true });
   });
+
+  // ---------- triage stats ----------
+  app.get("/api/stats", (c) => c.json(stats(c.req.query("account") || null)));
 
   app.get("/api/attachments/:account/:message/:id", async (c) => {
     if (opts.demo) return c.text("Attachments aren't available in the demo", 404);

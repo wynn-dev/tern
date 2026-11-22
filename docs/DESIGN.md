@@ -30,6 +30,14 @@ Everything ships as a single file: `bun build --compile` bundles the server, the
 
 Actions are optimistic twice: the UI patches its cache right away, and the server applies the change to SQLite before calling Gmail. If Gmail refuses, the labels are put back and the UI is told. Archive, trash and spam show an Undo toast.
 
+## Triage and inbox zero (`stats.ts`, `components/inbox-zero.tsx`)
+
+- The milestone is **zero unread in the Inbox**, per account and for All accounts; read mail may stay. An empty Inbox says "Inbox zero" instead of "Zero unread".
+- Every action you take in Tern is counted toward the server's local day in SQLite. `triage_threads` holds a row per thread you cleared that day, either by reading it while it was unread in the inbox or by archiving, trashing or spamming it out of the inbox, so a thread counts once however much you do to it. Undo (`?undo=1` on the action) and Mark unread take the thread back off the count. `zero_days` records the days an action left no unread mail in the inbox, per account and `''` for All accounts. The streak is the run of zero days ending today, or ending yesterday until today is reached. `GET /api/stats?account=` serves today's count, the streak and the last 30 days.
+- The client updates the counts optimistically, like the sidebar counts: cleared today ticks up and the streak gains today the moment you reach zero, without waiting for the server.
+- While you triage, the list header rolls its unread count down and shows "N cleared today", with a hairline showing progress toward zero (cleared ÷ cleared + unread). Archived rows collapse out (170 ms) where they were while the rest slide up. The list has already changed by then, so the next key acts at once. Rows that come back (undo) or arrive slide in.
+- At zero, a band with the day's art tops the list, and the reader pane (with nothing open) shows the art with the date, a line, cleared today and the streak. The art is generated SVG, seeded by the day: one of five palettes (each with light and dark colours, switched by CSS variables) and one of four compositions. It plays a short entrance the first time the page reaches zero, then stays still. `prefers-reduced-motion` turns all of it off, both the CSS and motion (`MotionConfig reducedMotion="user"`).
+
 ## Live updates
 
 There's one SSE stream, `/api/events`. Sync, AI and actions emit `{type, keys}`. The client batches events for 250 ms and then invalidates the affected React Query caches, so there's no polling.

@@ -81,6 +81,9 @@ export function keyHandler(get: () => Ctx) {
       if (!staysInView(s.view, action)) {
         const next = threads[i + 1] ?? threads[i - 1];
         s.select(next ? threadKey(next) : null);
+        // and the one after it, so the next archive lands on a loaded thread too
+        const after = threads[i + 2];
+        if (after) prefetchThread(qc, after);
       }
       void act([current], action);
     };

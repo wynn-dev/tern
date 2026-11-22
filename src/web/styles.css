@@ -132,3 +132,122 @@ kbd {
 .no-transitions * {
   transition: none !important;
 }
+
+/* ---------- triage motion: rows leave and come back, counts roll (see thread-list.tsx) ---------- */
+.row-out {
+  animation: row-out var(--row-ms, 170ms) cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@keyframes row-out {
+  from {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    opacity: 0;
+    translate: -14px 0;
+    clip-path: inset(0 0 100% 0);
+  }
+}
+.row-in {
+  animation: row-in var(--row-ms, 170ms) cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    translate: -10px 0;
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.ticker {
+  display: inline-flex;
+  overflow: hidden;
+  vertical-align: bottom;
+  font-variant-numeric: tabular-nums;
+}
+.ticker > * {
+  display: inline-block;
+}
+.ticker-down {
+  animation: ticker-down 180ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.ticker-up {
+  animation: ticker-up 180ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+@keyframes ticker-down {
+  from {
+    opacity: 0;
+    translate: 0 -70%;
+  }
+}
+@keyframes ticker-up {
+  from {
+    opacity: 0;
+    translate: 0 70%;
+  }
+}
+
+/* ---------- inbox zero (inbox-zero.tsx): both themes' colours ride along, the current one is used ---------- */
+.zero-art {
+  --z-sky0: var(--z-sky0-l);
+  --z-sky1: var(--z-sky1-l);
+  --z-sun: var(--z-sun-l);
+  --z-l1: var(--z-l1-l);
+  --z-l2: var(--z-l2-l);
+  --z-l3: var(--z-l3-l);
+}
+.dark .zero-art {
+  --z-sky0: var(--z-sky0-d);
+  --z-sky1: var(--z-sky1-d);
+  --z-sun: var(--z-sun-d);
+  --z-l1: var(--z-l1-d);
+  --z-l2: var(--z-l2-d);
+  --z-l3: var(--z-l3-d);
+}
+/* the first time you reach zero: the land settles in front to back and the sun rises, once */
+.zero-enter .zero-layer {
+  animation: zero-rise 900ms cubic-bezier(0.2, 0.9, 0.1, 1) both;
+  animation-delay: calc(var(--i, 0) * 90ms + 60ms);
+}
+.zero-enter .zero-sun {
+  animation: zero-sun 1400ms cubic-bezier(0.2, 0.9, 0.1, 1) both;
+}
+@keyframes zero-rise {
+  from {
+    opacity: 0;
+    translate: 0 36px;
+  }
+}
+@keyframes zero-sun {
+  from {
+    opacity: 0;
+    translate: 0 60px;
+  }
+}
+.zero-text {
+  animation: zero-text 500ms cubic-bezier(0.2, 0.9, 0.1, 1) 250ms both;
+}
+@keyframes zero-text {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-out {
+    display: none;
+  }
+  .row-in,
+  .ticker-down,
+  .ticker-up,
+  .zero-enter .zero-layer,
+  .zero-enter .zero-sun,
+  .zero-text {
+    animation: none;
+  }
+}
