@@ -289,7 +289,8 @@ const accountEmail = (accountId: string) =>
 
 /**
  * Recompute a thread's summary row from its messages; drops it when none are left.
- * A thread whose last message is the account's own has been answered, so it leaves Needs reply.
+ * A thread whose last message is the account's own has been answered, so it leaves Needs reply;
+ * a draft doesn't count, since it hasn't been sent.
  */
 export function rebuildThread(accountId: string, threadId: string) {
   const rows = db
@@ -306,7 +307,8 @@ export function rebuildThread(accountId: string, threadId: string) {
   for (const m of msgs) if (m.from_email && !seen.has(m.from_email)) seen.set(m.from_email, { name: m.from_name, email: m.from_email });
   const any = (l: string) => (msgs.some((m) => m.labels.includes(l)) ? 1 : 0);
   const every = (l: string) => (msgs.every((m) => m.labels.includes(l)) ? 1 : 0);
-  const answered = fromMe(last, accountEmail(accountId)) ? 1 : 0;
+  const lastSent = msgs.findLast((m) => !m.labels.includes("DRAFT"));
+  const answered = lastSent && fromMe(lastSent, accountEmail(accountId)) ? 1 : 0;
   db.query(`
     INSERT INTO threads (account_id, thread_id, subject, snippet, last_date, participants, count, unread, starred, in_inbox, in_sent, in_trash, in_spam, has_attachments, labels)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -444,7 +446,8 @@ export function unclassifiedThreads(limit: number, days = 14): Thread[] {
 export function setThreadAi(accountId: string, threadId: string, ai: { category: string; priority: number; summary: string; needs_reply: boolean }) {
   // the AI reads the whole thread and can still say "reply"; a thread you answered last isn't waiting on you
   const last = ai.needs_reply
-    ? (db.query("SELECT from_email, labels FROM messages WHERE account_id = ? AND thread_id = ? ORDER BY internal_date DESC LIMIT 1")
+    ? (db.query(`SELECT from_email, labels FROM messages WHERE account_id = ? AND thread_id = ?
+        AND NOT EXISTS (SELECT 1 FROM json_each(labels) WHERE value = 'DRAFT') ORDER BY internal_date DESC LIMIT 1`)
         .get(accountId, threadId) as { from_email: string; labels: string } | null)
     : null;
   const needsReply = ai.needs_reply && !(last && fromMe({ from_email: last.from_email, labels: JSON.parse(last.labels) }, accountEmail(accountId)));

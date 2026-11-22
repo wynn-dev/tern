@@ -85,6 +85,12 @@ test("replying takes a thread out of Needs reply, and the AI can't put it back",
   db.upsertMessages([{ ...base, id: "r3", internal_date: 3, from_name: "Linda", from_email: "linda@x.io", subject: "Re: Sunday dinner?", labels: ["INBOX"] }]);
   db.setThreadAi("r", "rt", { category: "personal", priority: 2, summary: "Bring wine?", needs_reply: true });
   expect(db.getThread("r", "rt")!.thread.needs_reply).toBe(1);
+
+  // a reply saved as a draft (in Gmail on the web or a phone) hasn't been sent: still waiting on you
+  db.upsertMessages([{ ...base, id: "r4", internal_date: 4, from_name: "Me", from_email: "me@reply.io", subject: "Re: Sunday dinner?", labels: ["DRAFT"] }]);
+  expect(db.getThread("r", "rt")!.thread.needs_reply).toBe(1);
+  db.setThreadAi("r", "rt", { category: "personal", priority: 2, summary: "Bring wine?", needs_reply: true });
+  expect(db.getThread("r", "rt")!.thread.needs_reply).toBe(1);
 });
 
 test("Starred and Needs reply leave out spam", () => {
