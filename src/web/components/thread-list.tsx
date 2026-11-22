@@ -9,6 +9,7 @@ import { displayName, firstName, shortDate } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CategoryChip, categoryMeta, CATEGORY } from "./bits";
+import { LoadError } from "./load-error";
 
 const ROW = 76;
 
@@ -93,7 +94,9 @@ const Row = memo(function Row({
 
 export function ThreadList() {
   const { view, account, query, selected, select, setQuery } = useStore();
-  const { threads, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useVisibleThreads();
+  const {
+    threads, isLoading, error, isRefetchError, isFetchNextPageError, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
+  } = useVisibleThreads();
   const { data } = useAccounts();
   const qc = useQueryClient();
   const accounts = useMemo(() => new Map((data?.accounts ?? []).map((a) => [a.id, a])), [data]);
@@ -106,8 +109,9 @@ export function ThreadList() {
 
   useEffect(() => {
     const last = items.at(-1);
-    if (last && last.index >= threads.length - 15 && hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [items, threads.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
+    // after a failed page, wait for Try again rather than refetching on every scroll
+    if (last && last.index >= threads.length - 15 && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage();
+  }, [items, threads.length, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   // keep the selected row in view as j/k move it
   const selectedIndex = useMemo(() => threads.findIndex((t) => threadKey(t) === selected), [threads, selected]);
@@ -133,13 +137,24 @@ export function ThreadList() {
         {!!unread && view === "inbox" && <span className="text-[12px] text-muted-foreground">{unread} unread</span>}
       </header>
       <SearchBox value={query} onChange={setQuery} />
+      {isRefetchError && !!threads.length && (
+        <div role="alert" className="flex h-8 shrink-0 items-center gap-2 border-b bg-destructive/8 px-4 text-[12px] text-destructive">
+          <span className="truncate">Couldn't refresh: {error?.message}</span>
+          <span className="flex-1" />
+          <button onClick={() => void refetch()} disabled={isFetching} className="shrink-0 font-medium underline-offset-2 hover:underline disabled:opacity-50">
+            {isFetching ? "Retrying…" : "Try again"}
+          </button>
+        </div>
+      )}
       <div ref={parent} className="scroll-thin relative flex-1 overflow-y-auto">
         {isLoading ? (
           <Skeleton />
+        ) : error && !threads.length ? (
+          <LoadError title="Couldn't load your mail" error={error} retrying={isFetching} onRetry={() => void refetch()} />
         ) : !threads.length ? (
           <Empty view={view} searching={!!query} />
         ) : (
-          <div style={{ height: v.getTotalSize() }} className="relative">
+          <div style={{ height: v.getTotalSize() + (isFetchNextPageError ? 48 : 0) }} className="relative">
             {items.map((it) => {
               const t = threads[it.index];
               const key = threadKey(t);
@@ -162,6 +177,12 @@ export function ThreadList() {
                 </div>
               );
             })}
+            {isFetchNextPageError && !isFetchingNextPage && (
+              <div role="alert" className="absolute inset-x-0 bottom-0 flex h-12 items-center justify-center gap-2 text-[12.5px] text-muted-foreground">
+                Couldn't load more.
+                <button onClick={() => void fetchNextPage()} className="font-medium text-foreground underline-offset-2 hover:underline">Try again</button>
+              </div>
+            )}
           </div>
         )}
       </div>

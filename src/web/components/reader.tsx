@@ -13,13 +13,14 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Avatar, CategoryChip, categoryMeta } from "./bits";
 import { EmailFrame } from "./email-frame";
+import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Tooltip } from "./ui/tooltip";
 
 export function Reader() {
   const selected = useStore((s) => s.selected);
-  const { data, isLoading } = useThread(selected);
+  const { data, isLoading, error, isFetching, refetch } = useThread(selected);
   return (
     <main className="relative flex min-w-0 flex-1 flex-col bg-background">
       <AnimatePresence mode="popLayout" initial={false}>
@@ -27,6 +28,8 @@ export function Reader() {
           <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className="flex flex-1 items-center justify-center">
             <NothingOpen />
           </motion.div>
+        ) : error && !data ? (
+          <LoadError key="error" title="Couldn't open this conversation" error={error} retrying={isFetching} onRetry={() => void refetch()} className="flex-1" />
         ) : isLoading || !data ? (
           <div key="loading" className="flex-1" />
         ) : (

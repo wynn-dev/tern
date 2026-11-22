@@ -144,6 +144,7 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS threads_date ON threads(last_date DESC);
     CREATE INDEX IF NOT EXISTS threads_inbox ON threads(in_inbox, last_date DESC);
     CREATE INDEX IF NOT EXISTS threads_ai ON threads(ai_at);
+    CREATE INDEX IF NOT EXISTS threads_page ON threads(last_date DESC, account_id DESC, thread_id DESC);
 
     CREATE TABLE IF NOT EXISTS labels (
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -313,9 +314,25 @@ export function rebuildThread(accountId: string, threadId: string) {
 type ThreadRow = Omit<Thread, "participants" | "labels"> & { participants: string; labels: string };
 const toThread = (r: ThreadRow): Thread => ({ ...r, participants: JSON.parse(r.participants), labels: JSON.parse(r.labels) });
 
-export type ThreadQuery = { view: string; account?: string; q?: string; before?: number; limit?: number };
+export type ThreadQuery = { view: string; account?: string; q?: string; cursor?: string; limit?: number };
 
-export function queryThreads({ view, account, q, before, limit = 60 }: ThreadQuery): Thread[] {
+/**
+ * Where the next page starts: the last thread's (last_date, account_id, thread_id), which is unique,
+ * so threads that share a timestamp are neither skipped nor repeated across pages.
+ */
+export const threadCursor = (t: Pick<Thread, "last_date" | "account_id" | "thread_id">) =>
+  Buffer.from(JSON.stringify([t.last_date, t.account_id, t.thread_id])).toString("base64url");
+
+function parseCursor(c: string): [number, string, string] | null {
+  try {
+    const v = JSON.parse(Buffer.from(c, "base64url").toString());
+    return Array.isArray(v) && typeof v[0] === "number" && typeof v[1] === "string" && typeof v[2] === "string" ? [v[0], v[1], v[2]] : null;
+  } catch {
+    return null;
+  }
+}
+
+export function queryThreads({ view, account, q, cursor, limit = 60 }: ThreadQuery): Thread[] {
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (view === "inbox") where.push("t.in_inbox = 1 AND t.in_trash = 0 AND t.in_spam = 0");
@@ -338,16 +355,18 @@ export function queryThreads({ view, account, q, before, limit = 60 }: ThreadQue
     where.push("t.account_id = ?");
     args.push(account);
   }
-  if (before) {
-    where.push("t.last_date < ?");
-    args.push(before);
+  const after = cursor ? parseCursor(cursor) : null;
+  if (cursor && !after) throw new Error("Bad cursor");
+  if (after) {
+    where.push("(t.last_date, t.account_id, t.thread_id) < (?, ?, ?)");
+    args.push(...after);
   }
   if (q?.trim()) {
     where.push(`EXISTS (SELECT 1 FROM messages m JOIN messages_fts f ON f.rowid = m.rowid
       WHERE messages_fts MATCH ? AND m.account_id = t.account_id AND m.thread_id = t.thread_id)`);
     args.push(ftsQuery(q));
   }
-  const sql = `SELECT t.* FROM threads t ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY t.last_date DESC LIMIT ?`;
+  const sql = `SELECT t.* FROM threads t ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY t.last_date DESC, t.account_id DESC, t.thread_id DESC LIMIT ?`;
   return (db.query(sql).all(...args, limit) as ThreadRow[]).map(toThread);
 }
 

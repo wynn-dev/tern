@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
@@ -12,19 +12,22 @@ import { ThreadList } from "./components/thread-list";
 import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
-import { useAccounts, useLiveUpdates } from "./hooks/data";
+import { LoadError } from "./components/load-error";
+import { useAccounts, useLiveUpdates, useSessionGuard } from "./hooks/data";
 import { SHORTCUTS, useKeyboard } from "./hooks/keyboard";
 import { api } from "./lib/api";
 import { useStore } from "./lib/store";
 
 export function App() {
-  const { data: session, refetch } = useQuery({ queryKey: ["session"], queryFn: api.session });
-  if (!session) return null;
-  if (!session.authed) return <SignIn onDone={() => void refetch()} />;
+  const qc = useQueryClient();
+  const { data: session, error, isFetching, refetch } = useQuery({ queryKey: ["session"], queryFn: api.session });
+  if (!session) return error ? <LoadError title="Couldn't open Tern" error={error} retrying={isFetching} onRetry={() => void refetch()} className="pb-0" /> : null;
+  if (!session.authed) return <SignIn expired={!!session.expired} onDone={() => void qc.invalidateQueries()} />;
   return <Mail />;
 }
 
 function Mail() {
+  useSessionGuard();
   useLiveUpdates();
   useKeyboard();
   const { data, isSuccess } = useAccounts();
@@ -80,7 +83,7 @@ function ShortcutsDialog() {
   );
 }
 
-function SignIn({ onDone }: { onDone: () => void }) {
+function SignIn({ expired, onDone }: { expired: boolean; onDone: () => void }) {
   const [pw, setPw] = useState("");
   const m = useMutation({ mutationFn: () => api.signIn(pw), onSuccess: onDone });
   return (
@@ -102,6 +105,7 @@ function SignIn({ onDone }: { onDone: () => void }) {
           </svg>
           <span className="text-[16px] font-semibold tracking-tight">Tern</span>
         </div>
+        {expired && <p className="text-[12.5px] text-muted-foreground">Your session ended. Sign in again to pick up where you left off.</p>}
         <Input autoFocus type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password" />
         {m.error && <p className="text-[12px] text-destructive">{m.error.message}</p>}
         <Button className="w-full" disabled={!pw || m.isPending}>

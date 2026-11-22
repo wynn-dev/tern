@@ -125,11 +125,9 @@ export function createApp(opts: AppOptions) {
   // ---------- threads ----------
   app.get("/api/threads", (c) => {
     const q = c.req.query();
-    const threads = db.queryThreads({
-      view: q.view ?? "inbox", account: q.account || undefined, q: q.q || undefined,
-      before: q.before ? Number(q.before) : undefined, limit: Math.min(Number(q.limit ?? 60), 200),
-    });
-    return c.json({ threads });
+    const limit = Math.min(Number(q.limit ?? 60), 200);
+    const threads = db.queryThreads({ view: q.view ?? "inbox", account: q.account || undefined, q: q.q || undefined, cursor: q.cursor || undefined, limit });
+    return c.json({ threads, next: threads.length === limit ? db.threadCursor(threads.at(-1)!) : null });
   });
 
   app.get("/api/threads/:account/:thread", (c) => {
@@ -199,6 +197,8 @@ export function createApp(opts: AppOptions) {
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       const off = events.on((e) => void stream.writeSSE({ data: JSON.stringify(e) }));
+      // a first write flushes the response, so the browser sees the (re)connection right away
+      void stream.writeSSE({ event: "ping", data: "" });
       const ping = setInterval(() => void stream.writeSSE({ event: "ping", data: "" }), 25_000);
       stream.onAbort(() => {
         off();
