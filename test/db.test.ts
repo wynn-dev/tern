@@ -42,3 +42,25 @@ test("a new message clears the AI verdict so it gets re-triaged", () => {
   db.upsertMessages([{ ...db.threadMessages("a", "t")[0], id: "3", internal_date: 3, labels: ["INBOX"] }]);
   expect(db.getThread("a", "t")!.thread.ai_at).toBeNull();
 });
+
+test("paging walks every thread even when many share a timestamp", () => {
+  db.upsertAccount({ id: "b", email: "bulk@x.io", name: "Bulk", token: null });
+  const base = { account_id: "b", from_name: "Me", from_email: "bulk@x.io", to: [], cc: [], html: "", references: "", attachments: [], snippet: "", text: "", message_id: "" };
+  // 500 sent threads over 20 distinct timestamps: 25 threads per millisecond, so ties cross every page boundary
+  db.upsertMessages(Array.from({ length: 500 }, (_, i) => ({
+    ...base, id: `m${i}`, thread_id: `s${i}`, internal_date: 1_000 + (i % 20), subject: `Bulk ${i}`, labels: ["SENT"],
+  })));
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let pages = 0; pages < 100; pages++) {
+    const page = db.queryThreads({ view: "sent", account: "b", cursor, limit: 60 });
+    seen.push(...page.map((t) => t.thread_id));
+    if (page.length < 60) break;
+    cursor = db.threadCursor(page.at(-1)!);
+  }
+  expect(seen).toHaveLength(500);
+  expect(new Set(seen).size).toBe(500);
+  // newest first
+  const dates = seen.map((id) => 1_000 + (Number(id.slice(1)) % 20));
+  expect(dates).toEqual([...dates].sort((a, b) => b - a));
+});

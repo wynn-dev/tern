@@ -31,20 +31,41 @@ export class ApiError extends Error {
   }
 }
 
+export type Session = { authed: boolean; passwordRequired: boolean; demo: boolean; /** set here, when a request is refused mid-session */ expired?: boolean };
+
+let signedOut: (() => void) | null = null;
+let ended = false;
+/** Called when the server refuses a request because the session has ended (expired, or signed out elsewhere). */
+export function onSignedOut(fn: () => void) {
+  signedOut = fn;
+  return () => {
+    if (signedOut === fn) signedOut = null;
+  };
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: { "x-tern": "1", ...(body !== undefined && { "content-type": "application/json" }) },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: { "x-tern": "1", ...(body !== undefined && { "content-type": "application/json" }) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, "Can't reach Tern. Check that it's running.");
+  }
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, (json as { error?: string }).error ?? res.statusText);
+  if (res.status === 401 && path !== "/api/login") {
+    ended = true;
+    signedOut?.();
+  }
+  if (!res.ok) throw new ApiError(res.status, (json as { error?: string }).error ?? (res.statusText || `Error ${res.status}`));
   return json as T;
 }
 
 export const api = {
-  session: () => req<{ authed: boolean; passwordRequired: boolean; demo: boolean }>("GET", "/api/session"),
-  signIn: (pw: string) => req("POST", "/api/login", { password: pw }),
+  session: () => req<Session>("GET", "/api/session").then((s) => (s.authed ? s : { ...s, expired: ended })),
+  signIn: (pw: string) => req("POST", "/api/login", { password: pw }).then((r) => ((ended = false), r)),
   signOut: () => req("POST", "/api/logout"),
   accounts: () => req<AccountsResponse>("GET", "/api/accounts"),
   connect: () => req<{ url: string; redirectUri: string }>("POST", "/api/accounts/connect"),
@@ -52,9 +73,9 @@ export const api = {
   updateAccount: (id: string, patch: Partial<Pick<Account, "name" | "color">>) => req("PATCH", `/api/accounts/${id}`, patch),
   removeAccount: (id: string) => req("DELETE", `/api/accounts/${id}`),
   sync: (id: string) => req("POST", `/api/accounts/${id}/sync`),
-  threads: (p: { view: string; account?: string; q?: string; before?: number }) => {
+  threads: (p: { view: string; account?: string; q?: string; cursor?: string }) => {
     const s = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
-    return req<{ threads: Thread[] }>("GET", `/api/threads?${s}`);
+    return req<{ threads: Thread[]; next: string | null }>("GET", `/api/threads?${s}`);
   },
   thread: (account: string, thread: string) => req<{ thread: Thread; messages: Message[] }>("GET", `/api/threads/${account}/${thread}`),
   act: (account: string, thread: string, action: Action) => req("POST", `/api/threads/${account}/${thread}/${action}`),

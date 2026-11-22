@@ -1,12 +1,12 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, threadKey, type Action, type Thread } from "@/lib/api";
+import { api, ApiError, onSignedOut, threadKey, type Action, type Session, type Thread } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
 export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: api.accounts, staleTime: 10_000 });
 
-type Page = { threads: Thread[] };
+type Page = { threads: Thread[]; next: string | null };
 
 export function useThreads() {
   const view = useStore((s) => s.view);
@@ -14,9 +14,9 @@ export function useThreads() {
   const q = useStore((s) => s.query);
   return useInfiniteQuery({
     queryKey: ["threads", view, account, q],
-    queryFn: ({ pageParam }) => api.threads({ view, account: account ?? undefined, q, before: pageParam }),
-    initialPageParam: undefined as number | undefined,
-    getNextPageParam: (last) => (last.threads.length >= 60 ? last.threads.at(-1)!.last_date : undefined),
+    queryFn: ({ pageParam }) => api.threads({ view, account: account ?? undefined, q, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next ?? undefined,
     placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === view && prevQuery?.queryKey[2] === account ? prev : undefined),
     staleTime: 5_000,
   });
@@ -78,6 +78,7 @@ export function useActions() {
       return {
         ...data,
         pages: data.pages.map((p) => ({
+          ...p,
           threads: p.threads.flatMap((t) => (!keys.has(threadKey(t)) ? [t] : staysInView(view, action) ? [patch(t, action)] : [])),
         })),
       };
@@ -93,17 +94,37 @@ export function useActions() {
         });
     } catch (e) {
       for (const [k, v] of snapshot) qc.setQueryData(k, v);
-      toast.error(`Couldn't ${action}: ${(e as Error).message}`);
+      // a 401 already took them to sign-in
+      if (!(e instanceof ApiError && e.status === 401)) toast.error(`Couldn't ${action}: ${(e as Error).message}`);
     } finally {
       void qc.invalidateQueries({ queryKey: ["accounts"] });
     }
   };
 }
 
+/** When the server says the session has ended, stop fetching and show the sign-in screen. */
+export function useSessionGuard() {
+  const qc = useQueryClient();
+  useEffect(
+    () =>
+      onSignedOut(() => {
+        void qc.cancelQueries({ predicate: (q) => q.queryKey[0] !== "session" });
+        qc.setQueryData<Session>(["session"], (s) => s && { ...s, authed: false, expired: true });
+      }),
+    [qc],
+  );
+}
+
 /** Server-sent events keep every list fresh without polling. */
 export function useLiveUpdates() {
   const qc = useQueryClient();
+  // the stream lives as long as the session: it closes on sign-out and a new one opens on signing in again
+  const authed = !!useQuery({ queryKey: ["session"], queryFn: api.session }).data?.authed;
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (!authed) return;
+    let dropped = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const pendingThreads = new Set<string>();
     const flush = () => {
@@ -114,6 +135,20 @@ export function useLiveUpdates() {
       pendingThreads.clear();
     };
     const es = new EventSource("/api/events");
+    es.onerror = () => {
+      dropped = true;
+      // the browser retries on its own after a network drop, but gives up for good on an HTTP error such as a 401:
+      // refetch so the request that fails says why (a 401 brings up sign-in), and open a new stream a little later
+      if (es.readyState === EventSource.CLOSED) {
+        void qc.invalidateQueries({ queryKey: ["accounts"] });
+        retry = setTimeout(() => setAttempt((n) => n + 1), 5_000);
+      }
+    };
+    // back after an outage: refetch what failed or went stale while it was down
+    es.onopen = () => {
+      if (dropped) void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "session" });
+      dropped = false;
+    };
     es.onmessage = (ev) => {
       const e = JSON.parse(ev.data) as { type: string; keys?: [string, string][] };
       for (const [a, t] of e.keys ?? []) pendingThreads.add(`${a}:${t}`);
@@ -122,6 +157,7 @@ export function useLiveUpdates() {
     return () => {
       es.close();
       clearTimeout(timer);
+      clearTimeout(retry);
     };
-  }, [qc]);
+  }, [qc, authed, attempt]);
 }
