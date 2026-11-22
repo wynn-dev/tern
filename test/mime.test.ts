@@ -1,11 +1,26 @@
 import { expect, test } from "bun:test";
-import { b64url, buildRaw, fromGmail, parseAddressList } from "../src/server/mime";
+import { b64url, buildRaw, fromGmail, invalidAddresses, parseAddressList } from "../src/server/mime";
 
 test("parses address lists with quotes and commas", () => {
   expect(parseAddressList(`"Lovelace, Ada" <Ada@Example.com>, bob@example.com`)).toEqual([
     { name: "Lovelace, Ada", email: "ada@example.com" },
     { name: "", email: "bob@example.com" },
   ]);
+});
+
+test("splits address lists on semicolons too", () => {
+  expect(parseAddressList("a@b.com; c@d.com;")).toEqual([
+    { name: "", email: "a@b.com" },
+    { name: "", email: "c@d.com" },
+  ]);
+  expect(parseAddressList(`"Lee; Jordan" <jo@x.io>`)).toEqual([{ name: "Lee; Jordan", email: "jo@x.io" }]);
+});
+
+test("names the entries that aren't email addresses", () => {
+  expect(invalidAddresses(`"Lovelace, Ada" <ada@example.com>, bob@example.co.uk; c@d.io`)).toEqual([]);
+  expect(invalidAddresses("")).toEqual([]);
+  expect(invalidAddresses("not-an-address")).toEqual(["not-an-address"]);
+  expect(invalidAddresses("ada@example.com, bob, Carol <carol@>, dan@localhost, e f@x.io")).toEqual(["bob", "Carol <carol@>", "dan@localhost", "e f@x.io"]);
 });
 
 test("reads text, html and attachments from a Gmail payload", () => {

@@ -27,23 +27,34 @@ export const b64url = {
   encode: (s: string) => Buffer.from(s, "utf8").toString("base64url"),
 };
 
-/** Parse `"Ada Lovelace" <ada@example.com>, bob@example.com` into addresses. */
+/** Parse `"Ada Lovelace" <ada@example.com>, bob@example.com` into addresses; `;` separates them too. */
 export function parseAddressList(v: string | undefined): Address[] {
+  return splitAddressList(v).map(parseAddress).filter((a) => a.email);
+}
+
+/** The entries of a typed address list that aren't an email address, as typed. */
+export function invalidAddresses(v: string | undefined): string[] {
+  return splitAddressList(v).filter((s) => !EMAIL.test(parseAddress(s).email)).map((s) => s.trim());
+}
+
+const EMAIL = /^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:".]+(\.[^\s@<>()[\]\\,;:".]+)+$/;
+
+function splitAddressList(v: string | undefined): string[] {
   if (!v) return [];
-  const out: Address[] = [];
-  // split on commas that are not inside quotes or angle brackets
+  const out: string[] = [];
+  // split on commas and semicolons that are not inside quotes or angle brackets
   let depth = 0, quote = false, cur = "";
   for (const ch of v) {
     if (ch === '"') quote = !quote;
     else if (!quote && ch === "<") depth++;
     else if (!quote && ch === ">") depth--;
-    if (ch === "," && !quote && depth === 0) {
-      out.push(parseAddress(cur));
+    if ((ch === "," || ch === ";") && !quote && depth === 0) {
+      if (cur.trim()) out.push(cur);
       cur = "";
     } else cur += ch;
   }
-  if (cur.trim()) out.push(parseAddress(cur));
-  return out.filter((a) => a.email);
+  if (cur.trim()) out.push(cur);
+  return out;
 }
 
 function parseAddress(s: string): Address {

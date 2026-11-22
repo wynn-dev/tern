@@ -22,7 +22,9 @@ type State = {
   query: string;
   selected: string | null; // thread key
   cursor: number;
+  /** The open draft as it was opened; what it holds now is `liveDraft()`. */
   compose: ComposeDraft | null;
+  composeMinimized: boolean;
   paletteOpen: boolean;
   settingsOpen: boolean;
   helpOpen: boolean;
@@ -30,17 +32,38 @@ type State = {
   setQuery: (q: string) => void;
   select: (key: string | null) => void;
   setCursor: (i: number) => void;
+  /** Open a draft. One with edits is never dropped without asking: say no and it stays, in view. */
   openCompose: (d?: Partial<ComposeDraft>) => void;
   closeCompose: () => void;
+  /** Close the draft, asking first if it has edits. False when the person keeps it. */
+  discardCompose: () => boolean;
+  minimizeCompose: (min: boolean) => void;
   set: (p: Partial<Pick<State, "paletteOpen" | "settingsOpen" | "helpOpen">>) => void;
 };
 
+/**
+ * What the open draft holds now. The composer writes it as you type, outside the store's state,
+ * so typing re-renders nothing but the composer.
+ */
+let live: ComposeDraft | null = null;
+export const liveDraft = () => live;
+export const editCompose = (d: ComposeDraft) => {
+  if (live?.id === d.id) live = d;
+};
+
+const fields = (d: ComposeDraft) => [d.to, d.cc, d.subject, d.text].map((v) => v.trim()).join("\u0000");
+/** Edited since it was opened: a Forward's copied message or a reply's prefilled To don't count. */
+export const isDirty = (opened: ComposeDraft | null) => !!opened && !!live && live.id === opened.id && fields(live) !== fields(opened);
+
+const confirmDiscard = () => confirm("Discard the draft you're writing?");
+
 const initial: Route = typeof location === "undefined" ? { view: "inbox", account: null, query: "", selected: null } : parseRoute(location);
 
-export const useStore = create<State>((set) => ({
+export const useStore = create<State>((set, get) => ({
   ...initial,
   cursor: 0,
   compose: null,
+  composeMinimized: false,
   paletteOpen: false,
   settingsOpen: false,
   helpOpen: false,
@@ -48,8 +71,26 @@ export const useStore = create<State>((set) => ({
   setQuery: (query) => set({ query, cursor: 0 }),
   select: (selected) => set({ selected }),
   setCursor: (cursor) => set({ cursor }),
-  openCompose: (d) => set({ compose: { id: crypto.randomUUID(), to: "", cc: "", subject: "", text: "", mode: "new", ...d } }),
-  closeCompose: () => set({ compose: null }),
+  openCompose: (d) =>
+    set((s) => {
+      if (isDirty(s.compose)) {
+        // r on the thread you're already answering brings that reply back
+        const same = !d?.text && d?.mode === s.compose!.mode && !!d.threadId && d.threadId === s.compose!.threadId;
+        if (same || !confirmDiscard()) return { composeMinimized: false };
+      }
+      live = { id: crypto.randomUUID(), to: "", cc: "", subject: "", text: "", mode: "new", ...d };
+      return { compose: live, composeMinimized: false };
+    }),
+  closeCompose: () => {
+    live = null;
+    set({ compose: null, composeMinimized: false });
+  },
+  discardCompose: () => {
+    if (isDirty(get().compose) && !confirmDiscard()) return false;
+    get().closeCompose();
+    return true;
+  },
+  minimizeCompose: (composeMinimized) => set({ composeMinimized }),
   set: (p) => set(p),
 }));
 
