@@ -73,13 +73,20 @@ export const useStore = create<State>((set, get) => ({
   setCursor: (cursor) => set({ cursor }),
   openCompose: (d) =>
     set((s) => {
+      const opened = { id: crypto.randomUUID(), to: "", cc: "", subject: "", text: "", mode: "new" as const, ...d };
       if (isDirty(s.compose)) {
-        // r on the thread you're already answering brings that reply back
-        const same = !d?.text && d?.mode === s.compose!.mode && !!d.threadId && d.threadId === s.compose!.threadId;
-        if (same || !confirmDiscard()) return { composeMinimized: false };
+        const cur = s.compose!;
+        // r or a on the thread you're already answering brings that reply back,
+        // with the recipients just asked for and what you've written kept
+        if (!d?.text && d?.mode === cur.mode && !!d.threadId && d.threadId === cur.threadId) {
+          if (d.to === cur.to && (d.cc ?? "") === cur.cc) return { composeMinimized: false };
+          live = { ...live!, id: opened.id, to: opened.to, cc: opened.cc };
+          return { compose: opened, composeMinimized: false };
+        }
+        if (!confirmDiscard()) return { composeMinimized: false };
       }
-      live = { id: crypto.randomUUID(), to: "", cc: "", subject: "", text: "", mode: "new", ...d };
-      return { compose: live, composeMinimized: false };
+      live = opened;
+      return { compose: opened, composeMinimized: false };
     }),
   closeCompose: () => {
     live = null;

@@ -51,6 +51,19 @@ test("replying again to the thread you're answering brings the reply back", () =
   expect(s().composeMinimized).toBe(false);
 });
 
+test("switching to reply all on the reply you're writing adds its Cc and keeps your text", () => {
+  s().openCompose(reply);
+  type({ text: "Thursday works" });
+  s().openCompose({ ...reply, cc: "dana@x.io, lee@x.io" });
+  expect(asked).toBe(0);
+  expect(liveDraft()).toMatchObject({ id: s().compose!.id, to: "priya@x.io", cc: "dana@x.io, lee@x.io", text: "Thursday works" });
+  // still a draft with edits, so it isn't dropped without asking
+  expect(s().discardCompose()).toBe(false);
+
+  s().openCompose(reply);
+  expect(liveDraft()).toMatchObject({ cc: "", text: "Thursday works" });
+});
+
 test("closing asks first only when the draft has edits", () => {
   s().openCompose();
   expect(s().discardCompose()).toBe(true);

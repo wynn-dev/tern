@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAccounts } from "@/hooks/data";
 import { api } from "@/lib/api";
-import { editCompose, isDirty, useStore, type ComposeDraft } from "@/lib/store";
+import { editCompose, isDirty, liveDraft, useStore, type ComposeDraft } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { invalidAddresses } from "../../server/mime";
@@ -13,7 +13,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 
 export function Composer() {
   const draft = useStore((s) => s.compose);
-  return <AnimatePresence>{draft && <ComposerPanel key={draft.id} initial={draft} />}</AnimatePresence>;
+  // the live draft, when it carries what you'd written over from the reply it replaced
+  return <AnimatePresence>{draft && <ComposerPanel key={draft.id} initial={liveDraft()?.id === draft.id ? liveDraft()! : draft} />}</AnimatePresence>;
 }
 
 function ComposerPanel({ initial }: { initial: ComposeDraft }) {
