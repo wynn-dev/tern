@@ -1,14 +1,15 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon, PlusIcon, RefreshCwIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 import { useAccounts } from "@/hooks/data";
 import { type ThemePref, useTheme } from "@/hooks/theme";
 import { type Account, api, type Settings } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
+import { IconButton } from "./ui/icon-button";
 import { Input } from "./ui/input";
 
 const MODELS = [
@@ -29,14 +30,13 @@ const THEMES: { pref: ThemePref; label: string }[] = [
  */
 export function checkForMail(accounts: Account[], qc: QueryClient) {
   if (!accounts.length) return void toast("No accounts yet", { description: "Add a Gmail account in Settings." });
-  toast.promise(
-    Promise.all(accounts.map((a) => api.sync(a.id))).finally(() => qc.invalidateQueries({ queryKey: ["accounts"] })),
-    {
-      loading: "Checking for new mail…",
-      success: accounts.length === 1 ? `Checking ${accounts[0].email} for new mail` : `Checking ${accounts.length} accounts for new mail`,
-      error: (e: Error) => `Couldn't check for new mail: ${e.message}`,
-    },
-  );
+  const id = toast.loading("Checking for new mail…");
+  void Promise.all(accounts.map((a) => api.sync(a.id)))
+    .then(
+      () => toast.success(accounts.length === 1 ? `Checking ${accounts[0].email} for new mail` : `Checking ${accounts.length} accounts for new mail`, { id }),
+      (e: Error) => toast.error(`Couldn't check for new mail: ${e.message}`, { id }),
+    )
+    .finally(() => qc.invalidateQueries({ queryKey: ["accounts"] }));
 }
 
 /** After an account is gone: stop showing it, or a view filtered to it sits empty with nothing to say why. */
@@ -125,7 +125,7 @@ function SettingsBody() {
             <summary className="cursor-pointer select-none hover:text-foreground">Google couldn't send you back here?</summary>
             <p className="mt-2">Copy the address of the page Google sent you to (it starts with {settings.redirectUri}) and paste it here.</p>
             <div className="mt-2 flex gap-2">
-              <Input value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={`${settings.redirectUri}?code=…`} />
+              <Input value={paste} onChange={(e) => setPaste(e.target.value)} aria-label="The address Google sent you to" placeholder={`${settings.redirectUri}?code=…`} />
               <Button variant="outline" disabled={!paste || complete.isPending} onClick={() => complete.mutate()}>
                 Connect
               </Button>
@@ -154,7 +154,7 @@ function SettingsBody() {
                       : `${ai.classified} conversations sorted since start`}
               </div>
             </div>
-            <Toggle on={!!settings?.ai.enabled} onChange={(enabled) => saveAi.mutate({ enabled })} />
+            <Toggle label="Sort, summarize and draft with Claude" on={!!settings?.ai.enabled} onChange={(enabled) => saveAi.mutate({ enabled })} />
           </div>
           <ModelPick label="Sorting" value={settings?.ai.classifyModel} onChange={(classifyModel) => saveAi.mutate({ classifyModel })} />
           <ModelPick label="Summaries & drafts" value={settings?.ai.writeModel} onChange={(writeModel) => saveAi.mutate({ writeModel })} />
@@ -202,17 +202,16 @@ function AccountRow({ account: a, onReconnect }: { account: Account; onReconnect
           Reconnect
         </Button>
       )}
-      <Button size="icon-sm" variant="ghost" disabled={sync.isPending} onClick={() => sync.mutate()}>
+      <IconButton label={`Check ${a.email} for new mail`} disabled={sync.isPending} onClick={() => sync.mutate()}>
         <RefreshCwIcon className={cn("!size-3.5", syncing && "animate-spin")} />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
+      </IconButton>
+      <IconButton
+        label={`Remove ${a.email}`}
         disabled={remove.isPending}
         onClick={() => confirm(`Remove ${a.email} from Tern? Its mail is deleted from Tern only, never from Gmail.`) && remove.mutate()}
       >
         {remove.isPending ? <Loader2Icon className="!size-3.5 animate-spin" /> : <Trash2Icon className="!size-3.5" />}
-      </Button>
+      </IconButton>
     </div>
   );
 }
@@ -288,14 +287,16 @@ function GoogleSection({ settings }: { settings?: Awaited<ReturnType<typeof api.
             setCopied(true);
             setTimeout(() => setCopied(false), 1200);
           }}
+          aria-label={copied ? "Copied" : "Copy the redirect URI"}
+          title="Copy"
           className="text-muted-foreground hover:text-foreground"
         >
           {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Input value={id} onChange={(e) => setId(e.target.value)} placeholder="Client ID" />
-        <Input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Client secret" type="password" autoComplete="off" />
+        <Input value={id} onChange={(e) => setId(e.target.value)} aria-label="Client ID" placeholder="Client ID" />
+        <Input value={secret} onChange={(e) => setSecret(e.target.value)} aria-label="Client secret" placeholder="Client secret" type="password" autoComplete="off" />
       </div>
       <Button variant="outline" disabled={!id || !secret || save.isPending} onClick={() => save.mutate()}>
         {settings.google.configured ? "Replace client" : "Save"}
@@ -323,11 +324,12 @@ function ModelPick({ label, value, onChange }: { label: string; value?: string; 
   );
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
       role="switch"
       aria-checked={on}
+      aria-label={label}
       onClick={() => onChange(!on)}
       className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors duration-150", on ? "bg-brand" : "bg-input")}
     >

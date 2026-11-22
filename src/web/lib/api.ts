@@ -39,6 +39,8 @@ export type Session = { authed: boolean; passwordRequired: boolean; demo: boolea
 
 let signedOut: (() => void) | null = null;
 let ended = false;
+/** Has the server refused a request because the session ended, with no sign-in since? */
+export const sessionEnded = () => ended;
 /** Called when the server refuses a request because the session has ended (expired, or signed out elsewhere). */
 export function onSignedOut(fn: () => void) {
   signedOut = fn;

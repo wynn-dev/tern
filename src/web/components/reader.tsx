@@ -5,16 +5,17 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import { useAccounts, useActions, useThread } from "@/hooks/data";
 import { api, type Message, type Thread } from "@/lib/api";
 import { addressLabel, bytes, displayName, longDate } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import { Avatar, CategoryChip, categoryMeta } from "./bits";
 import { EmailFrame } from "./email-frame";
 import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Tooltip } from "./ui/tooltip";
 
@@ -96,54 +97,42 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-0.5 border-b px-3">
-        <Tooltip label="Close" kbd="Esc">
-          <Button size="icon-sm" variant="ghost" onClick={() => select(null)}>
-            <ArrowLeftIcon />
-          </Button>
-        </Tooltip>
+        <IconButton label="Close" kbd="Esc" onClick={() => select(null)}>
+          <ArrowLeftIcon />
+        </IconButton>
         <div className="mx-1 h-4 w-px bg-border" />
         {thread.in_inbox ? (
-          <Tooltip label="Archive" kbd="E">
-            <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "archive")}>
-              <ArchiveIcon />
-            </Button>
-          </Tooltip>
+          <IconButton label="Archive" kbd="E" onClick={() => act([thread], "archive")}>
+            <ArchiveIcon />
+          </IconButton>
         ) : (
-          <Tooltip label="Move to inbox" kbd="⇧E">
-            <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "inbox")}>
-              <InboxIcon />
-            </Button>
-          </Tooltip>
+          <IconButton label="Move to inbox" kbd="⇧E" onClick={() => act([thread], "inbox")}>
+            <InboxIcon />
+          </IconButton>
         )}
         {thread.in_trash ? (
-          <Tooltip label="Restore" kbd="#">
-            <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "untrash")}>
-              <Undo2Icon />
-            </Button>
-          </Tooltip>
+          <IconButton label="Restore" kbd="#" onClick={() => act([thread], "untrash")}>
+            <Undo2Icon />
+          </IconButton>
         ) : (
-          <Tooltip label="Trash" kbd="#">
-            <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "trash")}>
-              <Trash2Icon />
-            </Button>
-          </Tooltip>
+          <IconButton label="Trash" kbd="#" onClick={() => act([thread], "trash")}>
+            <Trash2Icon />
+          </IconButton>
         )}
-        <Tooltip label={thread.starred ? "Unstar" : "Star"} kbd="S">
-          <Button size="icon-sm" variant="ghost" onClick={() => act([thread], thread.starred ? "unstar" : "star")}>
-            <StarIcon className={cn(thread.starred && "fill-amber-400 text-amber-400")} />
-          </Button>
-        </Tooltip>
-        <Tooltip label={thread.unread ? "Mark read" : "Mark unread"} kbd="U">
-          <Button size="icon-sm" variant="ghost" onClick={() => act([thread], thread.unread ? "read" : "unread")}>
-            {thread.unread ? <MailOpenIcon /> : <MailIcon />}
-          </Button>
-        </Tooltip>
+        <IconButton label={thread.starred ? "Unstar" : "Star"} kbd="S" onClick={() => act([thread], thread.starred ? "unstar" : "star")}>
+          <StarIcon className={cn(thread.starred && "fill-amber-400 text-amber-400")} />
+        </IconButton>
+        <IconButton label={thread.unread ? "Mark read" : "Mark unread"} kbd="U" onClick={() => act([thread], thread.unread ? "read" : "unread")}>
+          {thread.unread ? <MailOpenIcon /> : <MailIcon />}
+        </IconButton>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon-sm" variant="ghost">
-              <MoreHorizontalIcon />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip label="More">
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant="ghost" aria-label="More">
+                <MoreHorizontalIcon />
+              </Button>
+            </DropdownMenuTrigger>
+          </Tooltip>
           <DropdownMenuContent align="start">
             <DropdownMenuItem onSelect={() => act([thread], thread.in_spam ? "notspam" : "spam")}>
               <OctagonAlertIcon /> {thread.in_spam ? "Not spam" : "Report spam"}
@@ -298,7 +287,12 @@ function MessageCard({ m, me, open, onToggle }: { m: Message; me?: string; open:
                 <div className="pl-[42px] text-[14px] leading-relaxed whitespace-pre-wrap text-foreground/90">
                   {linkify(showQuoted ? m.text : body.main)}
                   {body.quoted && (
-                    <button onClick={() => setShowQuoted((v) => !v)} className="mt-2 flex h-5 items-center rounded bg-muted px-1.5 text-muted-foreground hover:text-foreground">
+                    <button
+                      onClick={() => setShowQuoted((v) => !v)}
+                      aria-label={showQuoted ? "Hide quoted text" : "Show quoted text"}
+                      aria-expanded={showQuoted}
+                      className="mt-2 flex h-5 items-center rounded bg-muted px-1.5 text-muted-foreground hover:text-foreground"
+                    >
                       <MoreHorizontalIcon className="size-3.5" />
                     </button>
                   )}
@@ -382,7 +376,7 @@ function AiDraftButton({ thread, messages, me }: { thread: Thread; messages: Mes
     onSuccess: ({ body }) => {
       setAsking(false);
       setInstruction("");
-      openCompose({ ...replyDraft(thread, messages, me, false), text: body });
+      openCompose({ ...replyDraft(thread, messages, me, false), text: body, generated: true });
     },
     onError: (e) => toast.error(e.message),
     onSettled: () => qc.invalidateQueries({ queryKey: ["ai-status"] }),
