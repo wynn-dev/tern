@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { existsSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { ACTIONS, applyAction, send, type Action } from "./actions";
-import { aiStatus, classifyPending, draftReply, summarizeThread } from "./ai";
+import { AiError, aiStatus, classifyPending, draftReply, summarizeThread } from "./ai";
 import { loadConfig, saveConfig, type Config } from "./config";
 import { randomId, sign, verify } from "./crypto";
 import * as db from "./db";
@@ -170,6 +170,7 @@ export function createApp(opts: AppOptions) {
     return c.json(await draftReply(accountId, threadId, instruction ?? ""));
   });
   app.post("/api/ai/classify", (c) => {
+    if (!loadConfig().ai.enabled) return c.json({ error: "AI is turned off in Settings.", code: "off" }, 409);
     void classifyPending();
     return c.json({ ok: true });
   });
@@ -208,6 +209,7 @@ export function createApp(opts: AppOptions) {
   );
 
   app.onError((err, c) => {
+    if (err instanceof AiError) return c.json({ error: err.message, code: err.code }, err.httpStatus);
     console.error(`[api] ${c.req.method} ${c.req.path}:`, err.message);
     return c.json({ error: err.message }, 500);
   });

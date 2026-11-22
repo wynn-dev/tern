@@ -155,12 +155,21 @@ export function Sidebar() {
           </Button>
         </Tooltip>
         <div className="flex-1" />
-        <Tooltip label={ai?.lastError ?? (ai?.claudePath ? `Claude: ${ai.claudePath}` : "Install Claude Code to turn on AI")} side="top">
+        <Tooltip
+          label={!ai?.enabled ? "AI is off" : !ai.claudePath ? "Install Claude Code to turn on AI" : (ai.lastError ?? `Claude: ${ai.claudePath}`)}
+          side="top"
+        >
           <div className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] text-muted-foreground">
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                !ai?.enabled || !ai?.claudePath ? "bg-muted-foreground/40" : ai.lastError ? "bg-amber-500" : "bg-emerald-500",
+                !ai?.enabled || !ai?.claudePath
+                  ? "bg-muted-foreground/40"
+                  : ai.lastErrorCode === "rate_limited"
+                    ? "bg-amber-500"
+                    : ai.lastError
+                      ? "bg-red-500"
+                      : "bg-emerald-500",
                 ai?.busy && "animate-pulse",
               )}
             />

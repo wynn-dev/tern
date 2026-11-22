@@ -4,8 +4,46 @@ import { ensureDataDir, loadConfig } from "./config";
 import { CATEGORIES, getAccount, setThreadAi, threadMessages, unclassifiedThreads, type Message, type Thread } from "./db";
 import { events } from "./events";
 
-export type AiStatus = { enabled: boolean; claudePath: string | null; busy: boolean; lastError: string | null; classified: number };
-const status: AiStatus = { enabled: false, claudePath: null, busy: false, lastError: null, classified: 0 };
+export type AiErrorCode = "off" | "signed_out" | "missing" | "rate_limited" | "failed";
+export type AiStatus = {
+  enabled: boolean; claudePath: string | null; busy: boolean; lastError: string | null; lastErrorCode: AiErrorCode | null; classified: number;
+};
+const status: AiStatus = { enabled: false, claudePath: null, busy: false, lastError: null, lastErrorCode: null, classified: 0 };
+
+/** A failure worth showing as is: the message says what happened and what to do. */
+export class AiError extends Error {
+  constructor(public code: AiErrorCode, message: string, public detail?: string) {
+    super(message);
+  }
+  get httpStatus(): 409 | 429 | 503 {
+    return this.code === "off" ? 409 : this.code === "rate_limited" ? 429 : 503;
+  }
+}
+
+/** Turn what the Claude Code CLI or the SDK threw into something a person can act on. */
+export function explainAiError(e: unknown): AiError {
+  if (e instanceof AiError) return e;
+  const raw = e instanceof Error ? e.message : String(e);
+  if (/invalid api key|run \/login|not logged in|log ?in required|authentication|oauth token|unauthorized|\b401\b/i.test(raw))
+    return new AiError("signed_out", "Claude Code isn't signed in. Run `claude /login` on the machine running Tern, then try again.", raw);
+  if (/executable not found|ENOENT|command not found|not installed/i.test(raw))
+    return new AiError("missing", "Claude Code isn't installed on the machine running Tern. Install it, run `claude /login`, then try again.", raw);
+  if (/rate.?limit|usage limit|limit reached|too many requests|overloaded|\b429\b|\b529\b/i.test(raw))
+    return new AiError("rate_limited", "Claude is rate limited right now. Try again in a few minutes.", raw);
+  return new AiError("failed", "Claude couldn't finish this. Try again; if it keeps failing, run `tern doctor` on the server.", raw);
+}
+
+const aiOff = () => new AiError("off", "AI is turned off in Settings.");
+
+function fail(e: unknown): AiError {
+  const err = explainAiError(e);
+  if (err.code !== "off") {
+    status.lastError = err.message;
+    status.lastErrorCode = err.code;
+    console.error("[ai]", err.detail ?? err.message);
+  }
+  return err;
+}
 
 export function claudePath(): string | null {
   const cfg = loadConfig().ai;
@@ -24,6 +62,18 @@ export function aiStatus(): AiStatus {
  * any API key in the environment is dropped so it never bills an API account.
  */
 async function ask<T>(opts: { model: string; system: string; prompt: string; schema?: Record<string, unknown> }): Promise<T> {
+  if (!loadConfig().ai.enabled) throw aiOff();
+  try {
+    const out = await askClaude<T>(opts);
+    status.lastError = null;
+    status.lastErrorCode = null;
+    return out;
+  } catch (e) {
+    throw fail(e);
+  }
+}
+
+async function askClaude<T>(opts: { model: string; system: string; prompt: string; schema?: Record<string, unknown> }): Promise<T> {
   const { ANTHROPIC_API_KEY: _drop, ...env } = process.env;
   const path = claudePath();
   let out: unknown;
@@ -44,6 +94,7 @@ async function ask<T>(opts: { model: string; system: string; prompt: string; sch
   })) {
     if (msg.type === "result") {
       if (msg.subtype !== "success") throw new Error(`Claude: ${msg.subtype}`);
+      if (msg.is_error) throw new Error(msg.result || "Claude returned an error");
       out = opts.schema ? msg.structured_output : msg.result;
     }
   }
@@ -108,15 +159,14 @@ export function classifyPending() {
   classifying = (async () => {
     status.busy = true;
     try {
-      for (let round = 0; round < 20; round++) {
+      // re-read each round so turning AI off stops a run in progress
+      for (let round = 0; round < 20 && loadConfig().ai.enabled; round++) {
         const batch = unclassifiedThreads(20);
         if (!batch.length) break;
         await classifyBatch(batch);
       }
-      status.lastError = null;
     } catch (e) {
-      status.lastError = e instanceof Error ? e.message : String(e);
-      console.error("[ai]", status.lastError);
+      fail(e); // ask() already recorded it in status
     } finally {
       status.busy = false;
       classifying = null;
@@ -154,6 +204,7 @@ async function classifyBatch(threads: Thread[]) {
 }
 
 export async function summarizeThread(accountId: string, threadId: string) {
+  if (!loadConfig().ai.enabled) throw aiOff();
   const msgs = threadMessages(accountId, threadId);
   if (!msgs.length) throw new Error("No such thread");
   const t = { account_id: accountId, subject: msgs[0].subject, labels: msgs.at(-1)!.labels } as Thread;
@@ -170,6 +221,7 @@ export async function summarizeThread(accountId: string, threadId: string) {
 }
 
 export async function draftReply(accountId: string, threadId: string, instruction: string) {
+  if (!loadConfig().ai.enabled) throw aiOff();
   const msgs = threadMessages(accountId, threadId);
   if (!msgs.length) throw new Error("No such thread");
   const acc = getAccount(accountId);
