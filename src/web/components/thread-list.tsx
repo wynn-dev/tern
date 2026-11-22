@@ -1,0 +1,215 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
+import { motion } from "motion/react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { prefetchThread, useAccounts, useThreads } from "@/hooks/data";
+import { threadKey, type Account, type Thread } from "@/lib/api";
+import { displayName, firstName, shortDate } from "@/lib/format";
+import { useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
+import { CategoryChip, categoryMeta, CATEGORY } from "./bits";
+
+const ROW = 76;
+
+export const VIEW_TITLES: Record<string, string> = {
+  inbox: "Inbox", "needs-reply": "Needs reply", starred: "Starred", sent: "Sent", all: "All mail", trash: "Trash", spam: "Spam",
+};
+export const viewTitle = (v: string) => VIEW_TITLES[v] ?? (v.startsWith("category:") ? CATEGORY[v.slice(9)]?.label : v.slice(6)) ?? v;
+
+export function useVisibleThreads() {
+  const q = useThreads();
+  const threads = useMemo(() => q.data?.pages.flatMap((p) => p.threads) ?? [], [q.data]);
+  return { ...q, threads };
+}
+
+function participantsLabel(t: Thread, me: string | undefined) {
+  const others = t.participants.filter((p) => p.email !== me);
+  const list = others.length ? others : t.participants;
+  if (t.in_sent && !others.length) return "Me";
+  if (list.length === 1) return displayName(list[0]);
+  return list.slice(0, 3).map(firstName).join(", ");
+}
+
+const Row = memo(function Row({
+  t, account, selected, showCategory, onSelect, onHover,
+}: {
+  t: Thread; account?: Account; selected: boolean; showCategory: boolean; onSelect: () => void; onHover: () => void;
+}) {
+  const unread = !!t.unread;
+  return (
+    <button
+      onClick={onSelect}
+      onMouseEnter={onHover}
+      className={cn(
+        "group relative flex h-full w-full flex-col justify-center gap-px border-b border-border/60 py-2 pr-4 pl-[26px] text-left leading-[19px] transition-colors duration-75",
+        selected ? "bg-selected" : "hover:bg-accent/50",
+      )}
+    >
+      {account && <span className="absolute top-3 bottom-3 left-[6px] w-[3px] rounded-full opacity-80" style={{ background: account.color }} />}
+      {unread && <span className="absolute top-[18px] left-[14px] size-1.5 rounded-full bg-brand" />}
+      <div className="flex items-center gap-2">
+        <span className={cn("truncate text-[13.5px]", unread ? "font-semibold text-foreground" : "font-medium text-foreground/80")}>
+          {participantsLabel(t, account?.email)}
+        </span>
+        {t.count > 1 && <span className="font-mono text-[11px] text-muted-foreground">{t.count}</span>}
+        {!!t.needs_reply && <span className="rounded-full bg-amber-500/12 px-1.5 text-[10.5px] font-medium text-amber-600 dark:text-amber-400">Reply</span>}
+        <span className="flex-1" />
+        {!!t.has_attachments && <PaperclipIcon className="size-3 text-muted-foreground" />}
+        {!!t.starred && <StarIcon className="size-3 fill-amber-400 text-amber-400" />}
+        {showCategory && t.category && <CategoryChip category={t.category} />}
+        <span className={cn("shrink-0 text-[11.5px] tabular-nums", unread ? "text-foreground" : "text-muted-foreground")}>{shortDate(t.last_date)}</span>
+      </div>
+      <div className={cn("truncate text-[13px]", unread ? "text-foreground" : "text-foreground/75")}>{t.subject || "(no subject)"}</div>
+      <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted-foreground">
+        {t.summary ? (
+          <>
+            <SparklesIcon className="size-3 shrink-0" style={{ color: categoryMeta(t.category).color }} />
+            <span className="truncate">{t.summary}</span>
+          </>
+        ) : (
+          <span className="truncate">{t.snippet}</span>
+        )}
+      </div>
+    </button>
+  );
+});
+
+export function ThreadList() {
+  const { view, account, query, selected, select, setQuery } = useStore();
+  const { threads, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useVisibleThreads();
+  const { data } = useAccounts();
+  const qc = useQueryClient();
+  const accounts = useMemo(() => new Map((data?.accounts ?? []).map((a) => [a.id, a])), [data]);
+  const parent = useRef<HTMLDivElement>(null);
+  const multi = accounts.size > 1;
+
+  const v = useVirtualizer({ count: threads.length, getScrollElement: () => parent.current, estimateSize: () => ROW, overscan: 12 });
+  const items = v.getVirtualItems();
+
+  useEffect(() => {
+    const last = items.at(-1);
+    if (last && last.index >= threads.length - 15 && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [items, threads.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // keep the selected row in view as j/k move it
+  const selectedIndex = useMemo(() => threads.findIndex((t) => threadKey(t) === selected), [threads, selected]);
+  useEffect(() => {
+    if (selectedIndex >= 0) v.scrollToIndex(selectedIndex, { align: "auto" });
+  }, [selectedIndex, v]);
+
+  const unread = threads.filter((t) => t.unread).length;
+  const acc = account ? accounts.get(account) : undefined;
+
+  return (
+    <section className="flex w-[420px] shrink-0 flex-col border-r bg-background">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <motion.h1 key={view} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="text-[14px] font-semibold tracking-tight">
+          {viewTitle(view)}
+        </motion.h1>
+        {acc && (
+          <span className="flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11.5px] text-muted-foreground">
+            <span className="size-1.5 rounded-full" style={{ background: acc.color }} />
+            {acc.email}
+          </span>
+        )}
+        {!!unread && view === "inbox" && <span className="text-[12px] text-muted-foreground">{unread} unread</span>}
+      </header>
+      <SearchBox value={query} onChange={setQuery} />
+      <div ref={parent} className="scroll-thin relative flex-1 overflow-y-auto">
+        {isLoading ? (
+          <Skeleton />
+        ) : !threads.length ? (
+          <Empty view={view} searching={!!query} />
+        ) : (
+          <div style={{ height: v.getTotalSize() }} className="relative">
+            {items.map((it) => {
+              const t = threads[it.index];
+              const key = threadKey(t);
+              return (
+                <div
+                  key={key}
+                  className="absolute inset-x-0 top-0 transition-transform duration-200 ease-(--ease-snap)"
+                  style={{ height: ROW, transform: `translateY(${it.start}px)` }}
+                >
+                  <Row
+                    t={t}
+                    account={multi ? accounts.get(t.account_id) : undefined}
+                    selected={key === selected}
+                    showCategory={!view.startsWith("category:")}
+                    onSelect={() => select(key)}
+                    onHover={() => prefetchThread(qc, t)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => setLocal(value), [value]);
+  useEffect(() => {
+    const t = setTimeout(() => local !== value && onChange(local), 120);
+    return () => clearTimeout(t);
+  }, [local, value, onChange]);
+  return (
+    <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4 text-muted-foreground focus-within:text-foreground">
+      <SearchIcon className="size-3.5" />
+      <input
+        id="search"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            setLocal("");
+            onChange("");
+            (e.target as HTMLInputElement).blur();
+          }
+          if (e.key === "Enter" || e.key === "ArrowDown") (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="Search mail"
+        className="h-full flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
+      />
+      {local ? (
+        <button onClick={() => (setLocal(""), onChange(""))} className="rounded p-0.5 hover:bg-accent">
+          <XIcon className="size-3.5" />
+        </button>
+      ) : (
+        <kbd>/</kbd>
+      )}
+    </div>
+  );
+}
+
+function Skeleton() {
+  return (
+    <div className="animate-pulse">
+      {Array.from({ length: 10 }, (_, i) => (
+        <div key={i} className="flex h-[76px] flex-col justify-center gap-2 border-b border-border/60 px-5">
+          <div className="h-3 w-1/3 rounded bg-muted" />
+          <div className="h-3 w-3/4 rounded bg-muted" />
+          <div className="h-2.5 w-2/3 rounded bg-muted/70" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Empty({ view, searching }: { view: string; searching: boolean }) {
+  const title = searching ? "No matches" : view === "inbox" ? "Inbox zero" : "Nothing here";
+  const sub = searching ? "Try fewer words, or search All mail." : view === "inbox" ? "Everything's handled. Enjoy the quiet." : "Mail that lands here shows up instantly.";
+  return (
+    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2 }} className="flex h-full flex-col items-center justify-center gap-1 pb-16 text-center">
+      <svg viewBox="0 0 32 32" className="mb-3 size-10 text-muted-foreground/30">
+        <path d="M6 20c4-1 7-4 10-9 2 4 5 7 10 8-5 0-8 1-10 5-2-3-5-4-10-4z" fill="currentColor" />
+      </svg>
+      <div className="text-[14px] font-medium">{title}</div>
+      <div className="text-[12.5px] text-muted-foreground">{sub}</div>
+    </motion.div>
+  );
+}
