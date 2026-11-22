@@ -5,7 +5,7 @@ A fast, quiet, self-hosted mail client for all your Gmail accounts at once, with
 - **One inbox for every account.** Each one is color-coded and can be filtered on its own, and you send from whichever account you pick.
 - **Fast by design.** Mail syncs into a local SQLite database with full-text search, so the UI never waits on Google. Actions show up instantly and sync in the background. The list is virtualized, and threads are prefetched when you hover them.
 - **Keyboard first.** `j`/`k`, `e` to archive, `r` to reply, `⌘K` for everything else. Built with Geist, shadcn/ui and motion.
-- **AI on your Claude subscription.** Claude sorts new mail into smart views (Important, Personal, Work, Finance, Travel, …), writes a one-line summary for each thread, flags the ones that need your reply, summarizes long threads and drafts replies in your voice. All of it runs through the Claude Agent SDK on your own Claude Code login, never through a pay-per-use API key.
+- **AI on your Claude subscription.** Claude sorts new mail into smart views (Important, Personal, Work, Finance, Travel, …), writes a one-line summary for each thread, flags the ones that need your reply, summarizes long threads and drafts replies in your voice. All of it runs through the Claude Agent SDK on your own Claude Code login, never through a pay-per-use API key unless you [point it at your own endpoint](#your-own-ai-endpoint).
 - **One binary.** `tern install` sets it up as a background service (launchd on macOS, systemd on Linux).
 
 ## Install
@@ -43,6 +43,18 @@ After that, add each Gmail account from **Settings → Add Gmail account**.
 ### Turn on AI
 
 Install [Claude Code](https://claude.com/claude-code) on the same machine, then run `claude` once and sign in with your Claude account. Tern finds it on `PATH` and uses that login. Run `tern doctor` to check. Models are set in Settings: Haiku sorts mail, Sonnet writes.
+
+#### Your own AI endpoint
+
+To use your own Anthropic-compatible endpoint and key instead of your Claude login, open *Settings → AI → Your own endpoint* and fill in:
+
+- **Endpoint URL**, e.g. `https://llm.example.com` (Claude Code adds `/v1/messages`).
+- **API key**. Tern encrypts it at rest, the same way as your Google client secret, and never sends it back to the browser or writes it to the log. Settings only show whether a key is set.
+- **Send the key as** `x-api-key` (the default, like `ANTHROPIC_API_KEY`) or a `Bearer` token (like `ANTHROPIC_AUTH_TOKEN`).
+
+The Sorting and Summaries & drafts models then become text fields, so you can type whatever names your endpoint uses. Every call still goes through Claude Code and the Agent SDK, which is why Claude Code has to be installed even with your own endpoint. *Use my Claude login instead* clears the endpoint and key. From the shell, use `tern config ai.baseUrl https://llm.example.com`, `tern config ai.apiKey <key>` and `tern config ai.keyHeader bearer`. The status dot and `tern doctor` both say which mode Tern is in.
+
+With no endpoint set, Tern removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the environment Claude Code runs in, so a key or URL left over in the server's environment can't send your mail somewhere else or bill an API account.
 
 ## Use
 

@@ -3,7 +3,7 @@ import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon, PlusIcon, RefreshCw
 import { useState } from "react";
 import { useAccounts } from "@/hooks/data";
 import { type ThemePref, useTheme } from "@/hooks/theme";
-import { type Account, api, type Settings } from "@/lib/api";
+import { type Account, type AiPatch, api, type KeyHeader, type Settings } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
@@ -16,6 +16,11 @@ const MODELS = [
   { id: "claude-haiku-5-5", label: "Haiku 5.5 — fastest, lightest on your plan" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5 — balanced" },
   { id: "claude-opus-5-5", label: "Opus 5.5 — best writing" },
+];
+
+const KEY_HEADERS: { id: KeyHeader; label: string }[] = [
+  { id: "x-api-key", label: "x-api-key" },
+  { id: "bearer", label: "Bearer token" },
 ];
 
 const THEMES: { pref: ThemePref; label: string }[] = [
@@ -138,7 +143,14 @@ function SettingsBody() {
 
       <AppearanceSection />
 
-      <Section title="AI" hint="Runs through Claude Code on this machine, on your Claude subscription. Mail goes only to Claude.">
+      <Section
+        title="AI"
+        hint={
+          settings?.ai.baseUrl
+            ? "Runs through Claude Code on this machine, on your own endpoint and key. Mail goes only to that endpoint."
+            : "Runs through Claude Code on this machine, on your Claude subscription. Mail goes only to Claude."
+        }
+      >
         <div className="space-y-3 rounded-lg border p-3">
           <div className="flex items-center gap-3">
             <SparklesIcon className="size-4 text-brand" />
@@ -148,7 +160,9 @@ function SettingsBody() {
                 {settings && !settings.ai.enabled
                   ? "Off. Tern sends nothing to Claude."
                   : !ai?.claudePath
-                    ? "Claude Code isn't installed on the server. Install it and run `claude /login` to sign in."
+                    ? settings?.ai.baseUrl
+                      ? "Claude Code isn't installed on the server. Tern needs it for your own endpoint too."
+                      : "Claude Code isn't installed on the server. Install it and run `claude /login` to sign in."
                     : ai.lastError
                       ? `Last error: ${ai.lastError}`
                       : `${ai.classified} conversations sorted since start`}
@@ -156,9 +170,16 @@ function SettingsBody() {
             </div>
             <Toggle label="Sort, summarize and draft with Claude" on={!!settings?.ai.enabled} onChange={(enabled) => saveAi.mutate({ enabled })} />
           </div>
-          <ModelPick label="Sorting" value={settings?.ai.classifyModel} onChange={(classifyModel) => saveAi.mutate({ classifyModel })} />
-          <ModelPick label="Summaries & drafts" value={settings?.ai.writeModel} onChange={(writeModel) => saveAi.mutate({ writeModel })} />
+          {/* a custom endpoint may name its models differently, so there they're typed in */}
+          <ModelPick label="Sorting" free={!!settings?.ai.baseUrl} value={settings?.ai.classifyModel} onChange={(classifyModel) => saveAi.mutate({ classifyModel })} />
+          <ModelPick label="Summaries & drafts" free={!!settings?.ai.baseUrl} value={settings?.ai.writeModel} onChange={(writeModel) => saveAi.mutate({ writeModel })} />
         </div>
+        <datalist id="tern-models">
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id} />
+          ))}
+        </datalist>
+        {settings && <EndpointFields ai={settings.ai} />}
       </Section>
 
       {session?.passwordRequired && (
@@ -305,7 +326,101 @@ function GoogleSection({ settings }: { settings?: Awaited<ReturnType<typeof api.
   );
 }
 
-function ModelPick({ label, value, onChange }: { label: string; value?: string; onChange: (v: string) => void }) {
+/** Back on the Claude login, a model named for the endpoint wouldn't be found: put it back to the default. */
+const claudeModels = (ai: Settings["ai"]) => ({
+  ...(MODELS.some((m) => m.id === ai.classifyModel) ? {} : { classifyModel: "claude-haiku-5-5" }),
+  ...(MODELS.some((m) => m.id === ai.writeModel) ? {} : { writeModel: "claude-sonnet-5-5" }),
+});
+
+/** Optional: your own Anthropic-compatible endpoint and key. Empty, Tern uses the Claude Code login. */
+function EndpointFields({ ai }: { ai: Settings["ai"] }) {
+  const qc = useQueryClient();
+  const [url, setUrl] = useState(ai.baseUrl ?? "");
+  const [key, setKey] = useState("");
+  const [header, setHeader] = useState<KeyHeader>(ai.keyHeader ?? "x-api-key");
+  const save = useMutation({
+    mutationFn: (patch: AiPatch) => api.saveSettings({ ai: patch }),
+    onSuccess: (_, patch) => {
+      toast.success(patch.baseUrl ? "Tern's AI now uses your endpoint" : "Tern's AI is back on your Claude Code login");
+      setKey("");
+      if (!patch.baseUrl) setUrl("");
+    },
+    onError: (e) => toast.error(`Couldn't save the endpoint: ${e.message}`),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["ai-status"] })]),
+  });
+  const changed = url.trim() !== (ai.baseUrl ?? "") || !!key || header !== (ai.keyHeader ?? "x-api-key");
+  return (
+    <details open={!!ai.baseUrl} className="rounded-lg border p-3 text-[13px]">
+      <summary className="cursor-pointer select-none font-medium">Your own endpoint (optional)</summary>
+      <div className="mt-3 space-y-2.5">
+        <p className="text-[12px] text-muted-foreground">
+          Any Anthropic-compatible endpoint. Claude Code still makes every call; it sends them there with this key instead of your Claude login. Leave the URL empty to use the login.
+        </p>
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} aria-label="Endpoint URL" placeholder="Endpoint URL, like https://llm.example.com" />
+        <Input
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          aria-label="API key"
+          placeholder={ai.apiKeySet ? "API key is set · type a new one to replace it" : "API key"}
+          type="password"
+          autoComplete="off"
+        />
+        <div className="flex items-center gap-3">
+          <span className="w-36 text-muted-foreground">Send the key as</span>
+          <div role="radiogroup" aria-label="Send the key as" className="inline-flex rounded-lg border p-0.5">
+            {KEY_HEADERS.map((h) => (
+              <button
+                key={h.id}
+                role="radio"
+                aria-checked={header === h.id}
+                onClick={() => setHeader(h.id)}
+                className={cn(
+                  "h-7 rounded-md px-3 text-[13px] font-medium text-muted-foreground transition-colors duration-100 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                  header === h.id && "bg-accent text-foreground",
+                )}
+              >
+                {h.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            disabled={!changed || !url.trim() || (!key && !ai.apiKeySet) || save.isPending}
+            onClick={() => save.mutate({ baseUrl: url.trim(), keyHeader: header, ...(key ? { apiKey: key } : {}) })}
+          >
+            {save.isPending && <Loader2Icon className="animate-spin" />} Save endpoint
+          </Button>
+          {(ai.baseUrl || ai.apiKeySet) && (
+            <Button variant="ghost" disabled={save.isPending} onClick={() => save.mutate({ baseUrl: "", apiKey: "", ...claudeModels(ai) })}>
+              Use my Claude login instead
+            </Button>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ModelPick({ label, value, free, onChange }: { label: string; value?: string; free?: boolean; onChange: (v: string) => void }) {
+  if (free)
+    return (
+      <label className="flex items-center gap-3 text-[13px]">
+        <span className="w-36 text-muted-foreground">{label}</span>
+        <Input
+          // keyed by the saved value, so a save (or a failed one) shows what the server holds
+          key={value}
+          defaultValue={value}
+          list="tern-models"
+          aria-label={`${label} model`}
+          placeholder="Model name, as your endpoint calls it"
+          className="h-8 flex-1"
+          onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== value && onChange(e.target.value.trim())}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+      </label>
+    );
   return (
     <label className="flex items-center gap-3 text-[13px]">
       <span className="w-36 text-muted-foreground">{label}</span>
@@ -314,6 +429,8 @@ function ModelPick({ label, value, onChange }: { label: string; value?: string; 
         onChange={(e) => onChange(e.target.value)}
         className="h-8 flex-1 rounded-md border bg-transparent px-2 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 dark:bg-input/30"
       >
+        {/* a name typed in for an endpoint that's since been cleared */}
+        {value && !MODELS.some((m) => m.id === value) && <option value={value}>{value}</option>}
         {MODELS.map((m) => (
           <option key={m.id} value={m.id}>
             {m.label}

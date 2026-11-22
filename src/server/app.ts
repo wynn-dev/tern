@@ -7,7 +7,7 @@ import { extname, join, resolve } from "node:path";
 import { ACTIONS, applyAction, send, SendError, type Action, type SendInput } from "./actions";
 import { AiError, aiStatus, classifyPending, draftReply, summarizeThread } from "./ai";
 import { loadConfig, saveConfig, type Config } from "./config";
-import { randomId, sign, verify } from "./crypto";
+import { randomId, seal, sign, verify } from "./crypto";
 import * as db from "./db";
 import { events } from "./events";
 import { authUrl, exchangeCode, gmail, redirectUri } from "./gmail";
@@ -21,6 +21,14 @@ const MIME: Record<string, string> = {
 };
 
 const pendingOAuth = new Map<string, number>();
+
+/** An endpoint URL from Settings, checked; "" clears it, back to the Claude Code login. */
+function endpointUrl(v: unknown): string | undefined {
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  const u = URL.parse(v.trim());
+  if (!u || (u.protocol !== "http:" && u.protocol !== "https:")) throw fail(400, "The endpoint URL must start with http:// or https://");
+  return u.href.replace(/\/$/, "");
+}
 
 /** A mistake in the request: its status and a message the UI can show as is. Anything else that throws is a fault, a 500. */
 const fail = (status: 400 | 404, error: string) => new HTTPException(status, { message: error });
@@ -216,16 +224,27 @@ export function createApp(opts: AppOptions) {
     return c.json({
       google: { configured: !!cfg.google?.clientId, clientId: cfg.google?.clientId ?? "" },
       redirectUri: redirectUri(),
-      ai: cfg.ai,
+      // the key stays on the server: the browser only learns whether one is set
+      ai: { ...cfg.ai, apiKey: undefined, apiKeySet: !!cfg.ai.apiKey },
       sync: cfg.sync,
     });
   });
 
   app.put("/api/settings", async (c) => {
-    const patch = await body<{ google: { clientId: string; clientSecret: string }; ai: Partial<Config["ai"]> }>(c);
+    const patch = await body<{ google: { clientId: string; clientSecret: string }; ai: Partial<Config["ai"]> & { apiKeySet?: unknown } }>(c);
     const cfg = loadConfig();
     if (patch.google?.clientId) cfg.google = { clientId: patch.google.clientId.trim(), clientSecret: patch.google.clientSecret?.trim() || cfg.google?.clientSecret || "" };
-    if (patch.ai) cfg.ai = { ...cfg.ai, ...patch.ai };
+    if (patch.ai) {
+      const { baseUrl, apiKey, keyHeader, apiKeySet: _, ...rest } = patch.ai;
+      cfg.ai = { ...cfg.ai, ...rest };
+      if (baseUrl !== undefined) cfg.ai.baseUrl = endpointUrl(baseUrl);
+      // the key arrives in the clear and is sealed before it touches the disk; "" removes it
+      if (apiKey !== undefined) cfg.ai.apiKey = typeof apiKey === "string" && apiKey.trim() ? seal(apiKey.trim()) : undefined;
+      if (keyHeader !== undefined) {
+        if (keyHeader !== "x-api-key" && keyHeader !== "bearer") throw fail(400, "Send the key as x-api-key or bearer");
+        cfg.ai.keyHeader = keyHeader;
+      }
+    }
     saveConfig(cfg);
     return c.json({ ok: true });
   });
