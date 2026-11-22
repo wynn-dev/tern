@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, expect, test } from "bun:test";
+import { beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,6 +64,36 @@ test("a background sort that finds nothing to do doesn't clear the last failure"
   db.setThreadAi("a", "t", { category: "personal", priority: 1, summary: "Lunch", needs_reply: true });
   await classifyPending();
   expect(aiStatus().lastErrorCode).toBe("signed_out");
+});
+
+// a fresh inbox thread, so the background sort has something to do
+const freshThread = (id: string) =>
+  db.upsertMessages([
+    {
+      id, account_id: "a", thread_id: id, internal_date: Date.now(), from_name: "Bo", from_email: "bo@x.io", to: [], cc: [],
+      subject: "Dinner?", snippet: "", text: "dinner on saturday?", html: "", labels: ["INBOX"], message_id: "", references: "", attachments: [],
+    },
+  ]);
+
+test("a sort with nothing to do doesn't stop later sorts", async () => {
+  setAi(true);
+  db.setThreadAi("a", "t", { category: "personal", priority: 1, summary: "Lunch", needs_reply: true });
+  await classifyPending();
+  freshThread("t2");
+  await classifyPending();
+  expect(existsSync(calls) && readFileSync(calls, "utf8")).toContain("called");
+});
+
+test("a failed background sort logs its error once", async () => {
+  setAi(true);
+  freshThread("t3");
+  const log = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await classifyPending();
+    expect(log.mock.calls.filter(([tag]) => tag === "[ai]")).toHaveLength(1);
+  } finally {
+    log.mockRestore();
+  }
 });
 
 test("maps Claude Code failures to plain messages", () => {

@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArchiveIcon, ArrowLeftIcon, CheckCircle2Icon, ChevronDownIcon, DownloadIcon, ForwardIcon, InboxIcon, Loader2Icon, MailIcon, MailOpenIcon,
-  MoreHorizontalIcon, OctagonAlertIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, SparklesIcon, StarIcon, Trash2Icon, WandSparklesIcon,
+  MoreHorizontalIcon, OctagonAlertIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, SparklesIcon, StarIcon, Trash2Icon, Undo2Icon, WandSparklesIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAccounts, useActions, useThread } from "@/hooks/data";
 import { api, type Message, type Thread } from "@/lib/api";
-import { bytes, displayName, longDate } from "@/lib/format";
+import { addressLabel, bytes, displayName, longDate } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Avatar, CategoryChip, categoryMeta } from "./bits";
@@ -69,12 +69,12 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded(messages)));
   useEffect(() => setExpanded(new Set(initialExpanded(messages))), [thread.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // mark read after a beat, so flicking through with j/k doesn't
+  // mark read after a beat, so flicking through with j/k doesn't; only on open, so "Mark unread" sticks
   useEffect(() => {
     if (!thread.unread) return;
     const t = setTimeout(() => void act([thread], "read", { quiet: true }), 600);
     return () => clearTimeout(t);
-  }, [thread.thread_id, thread.unread]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [thread.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const qc = useQueryClient();
   const { data: ai } = useQuery({ queryKey: ["ai-status"], queryFn: api.aiStatus });
@@ -84,6 +84,10 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
     onSettled: () => qc.invalidateQueries({ queryKey: ["ai-status"] }),
   });
   useEffect(() => summary.reset(), [thread.thread_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // turning AI off hides Summarize, so don't leave its last error behind
+  useEffect(() => {
+    if (!ai?.enabled && summary.isError) summary.reset();
+  }, [ai?.enabled, summary.isError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const last = messages.at(-1)!;
   const reply = (all: boolean) => openCompose(replyDraft(thread, messages, account?.email, all));
@@ -110,11 +114,19 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
             </Button>
           </Tooltip>
         )}
-        <Tooltip label="Trash" kbd="#">
-          <Button size="icon-sm" variant="ghost" onClick={() => act([thread], thread.in_trash ? "untrash" : "trash")}>
-            <Trash2Icon />
-          </Button>
-        </Tooltip>
+        {thread.in_trash ? (
+          <Tooltip label="Restore">
+            <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "untrash")}>
+              <Undo2Icon />
+            </Button>
+          </Tooltip>
+        ) : (
+          <Tooltip label="Trash" kbd="#">
+            <Button size="icon-sm" variant="ghost" onClick={() => act([thread], "trash")}>
+              <Trash2Icon />
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip label={thread.starred ? "Unstar" : "Star"} kbd="S">
           <Button size="icon-sm" variant="ghost" onClick={() => act([thread], thread.starred ? "unstar" : "star")}>
             <StarIcon className={cn(thread.starred && "fill-amber-400 text-amber-400")} />
@@ -247,7 +259,7 @@ function AiCard({
 function MessageCard({ m, me, open, onToggle }: { m: Message; me?: string; open: boolean; onToggle: () => void }) {
   const from = { name: m.from_name, email: m.from_email };
   const mine = m.from_email === me;
-  const recipients = [...m.to, ...m.cc].map((a) => (a.email === me ? "me" : displayName(a))).join(", ");
+  const recipients = [...m.to, ...m.cc].map((a) => (a.email === me ? "me" : addressLabel(a))).join(", ");
   const body = useMemo(() => stripQuoted(m.text), [m.text]);
   const [showQuoted, setShowQuoted] = useState(false);
 
@@ -346,10 +358,12 @@ export function replyDraft(thread: Thread, messages: Message[], me: string | und
   };
 }
 
-function forwardDraft(thread: Thread, m: Message) {
+export function forwardDraft(thread: Thread, m: Message) {
+  const files = m.attachments.map((a) => a.filename);
   return {
     mode: "forward" as const, accountId: thread.account_id, to: "", cc: "", subject: reSubject(thread.subject, "Fwd"),
     text: `\n\n---------- Forwarded message ----------\nFrom: ${m.from_name} <${m.from_email}>\nDate: ${longDate(m.internal_date)}\nSubject: ${m.subject}\n\n${m.text}`,
+    note: files.length ? `Attachments aren't included: ${files.join(", ")}` : undefined,
   };
 }
 

@@ -166,12 +166,14 @@ export function classifyPending() {
         await classifyBatch(batch);
       }
     } catch (e) {
-      fail(e); // ask() already recorded it in status
+      // ask() already recorded and logged its own failures; record anything else once
+      if (!(e instanceof AiError)) fail(e);
     } finally {
       status.busy = false;
-      classifying = null;
     }
-  })();
+    // cleared once assigned: a run with nothing to do ends before the assignment below,
+    // and clearing it inside would leave every later call returning this finished run
+  })().finally(() => (classifying = null));
   return classifying;
 }
 
