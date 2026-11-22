@@ -44,6 +44,17 @@ function Mail() {
   const { data, isSuccess } = useAccounts();
   const set = useStore((s) => s.set);
 
+  // back to the tab: check for new mail now instead of waiting for the next tick (the stream reconnecting does too)
+  useEffect(() => {
+    const back = () => document.visibilityState === "visible" && void api.syncAll().catch(() => {});
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
+    };
+  }, []);
+
   // results of the Google sign-in redirect
   useEffect(() => {
     const p = new URLSearchParams(location.search);

@@ -34,13 +34,15 @@ export type Config = {
     keyHeader?: KeyHeader;
   };
   sync: { intervalSec: number; initialDays: number; maxInitial: number };
+  /** Set by saveConfig; a file without it was saved by an older Tern, which wrote out every default as it stood then. */
+  version?: number;
 };
 
 export const defaults: Config = {
   host: "127.0.0.1",
   port: 7420,
   ai: { enabled: true, classifyModel: "claude-haiku-5-5", writeModel: "claude-sonnet-5-5" },
-  sync: { intervalSec: 30, initialDays: 60, maxInitial: 1500 },
+  sync: { intervalSec: 10, initialDays: 60, maxInitial: 1500 },
 };
 
 export function dataDir(): string {
@@ -62,6 +64,8 @@ export function loadConfig(): Config {
   const p = configPath();
   if (!existsSync(p)) return structuredClone(defaults);
   const raw = JSON.parse(readFileSync(p, "utf8"));
+  // the old default of 30 s was saved along with everything else: it wasn't a choice, so it gets the new default
+  if (!raw.version && raw.sync?.intervalSec === 30) delete raw.sync.intervalSec;
   return {
     ...defaults,
     ...raw,
@@ -72,7 +76,9 @@ export function loadConfig(): Config {
 
 export function saveConfig(cfg: Config) {
   ensureDataDir();
-  writeFileSync(configPath(), JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  // sync settings only where they differ from the default, so a new default reaches everyone who never changed it
+  const sync = Object.fromEntries(Object.entries(cfg.sync).filter(([k, v]) => v !== defaults.sync[k as keyof Config["sync"]]));
+  writeFileSync(configPath(), JSON.stringify({ ...cfg, sync, version: 2 }, null, 2) + "\n", { mode: 0o600 });
   chmodSync(configPath(), 0o600);
 }
 

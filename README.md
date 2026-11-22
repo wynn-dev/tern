@@ -71,6 +71,8 @@ With no endpoint set, Tern removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` a
 | `tern doctor` | check the service, Google and Claude |
 | `tern uninstall [--purge]` | remove the service (and with `--purge`, all local data) |
 
+New mail shows up within about 10 seconds. Tern asks Gmail for changes every 10 seconds, and also as soon as you come back to the Tern tab. Each check costs a sliver of Gmail's quota. To check less often, run `tern config sync.intervalSec 60` and then `tern restart`. `tern config sync.intervalSec 10` puts it back to the default. While Gmail is rate-limiting Tern, checks wait until Gmail allows them again, and the account says it's catching up.
+
 Keyboard: `j/k` move · `enter` open · `e` archive · `#` trash · `s` star · `u` unread · `r` reply · `a` reply all · `c` compose · `/` search · `g i` inbox · `⌘K` commands · `?` all shortcuts.
 
 ## Develop
