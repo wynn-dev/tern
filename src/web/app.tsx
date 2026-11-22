@@ -13,7 +13,7 @@ import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
 import { LoadError } from "./components/load-error";
-import { useAccounts, useLiveUpdates, useSessionGuard } from "./hooks/data";
+import { useAccounts, useLiveUpdates, useReadOnOpen, useSessionGuard } from "./hooks/data";
 import { SHORTCUTS, useKeyboard } from "./hooks/keyboard";
 import { api } from "./lib/api";
 import { useStore } from "./lib/store";
@@ -40,6 +40,7 @@ export function App() {
 function Mail() {
   useSessionGuard();
   useLiveUpdates();
+  useReadOnOpen();
   useKeyboard();
   const { data, isSuccess } = useAccounts();
   const set = useStore((s) => s.set);
