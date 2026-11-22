@@ -204,12 +204,11 @@ async function api<T>(
     if (isRateLimit(res.status, body)) {
       // the quota is per minute: wait as long as Gmail says, else long enough for the minute to roll over
       background.getStore()?.onRateLimit?.();
-      if (limited++ < 4) {
-        const said = retryAfter(res, body);
-        const ms = said !== undefined ? Math.max(said, quota.minuteMs / 60) : quota.minuteMs * Math.min(1, 2 ** (limited - 3)) * (1 + Math.random() * 0.2);
-        bucket(accountId).pause(ms);
-        continue;
-      }
+      const said = retryAfter(res, body);
+      const ms = said !== undefined ? Math.max(said, quota.minuteMs / 60) : quota.minuteMs * Math.min(1, 2 ** (limited - 2)) * (1 + Math.random() * 0.2);
+      // paused even when giving up, so the next sync tick waits it out instead of asking again
+      bucket(accountId).pause(ms);
+      if (limited++ < 4) continue;
       throw new GmailError(res.status, RATE_LIMITED, true);
     }
     // back off on transient errors

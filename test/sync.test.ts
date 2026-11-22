@@ -10,7 +10,7 @@ const db = await import("../src/server/db");
 const { seal } = await import("../src/server/crypto");
 const { events } = await import("../src/server/events");
 const { gmail, quota } = await import("../src/server/gmail");
-const { syncAccount, CATCHING_UP } = await import("../src/server/sync");
+const { syncAccount, syncAll, syncSoon, CATCHING_UP } = await import("../src/server/sync");
 
 beforeAll(() => db.openDb(join(dir, "sync.db")));
 
@@ -130,3 +130,43 @@ test("a user action goes ahead of the sync's queued calls", async () => {
   g.minuteMs = quota.minuteMs = 600;
   await sync;
 }, 30_000);
+
+test("ticks while a slow first sync runs join it instead of stacking a second one", async () => {
+  const g = fake({ messages: 300, minuteMs: 6_000 });
+  // only this account, so every profile call below is its own
+  for (const a of db.listAccounts()) db.deleteAccount(a.id);
+  const id = connect();
+  const sync = syncAccount(id);
+  // the loop ticks every 10 s; a first sync of a big mailbox outlasts several of them
+  for (let i = 0; i < 5; i++) {
+    syncAll();
+    await Bun.sleep(20);
+  }
+  expect(syncAccount(id)).toBe(sync);
+  await sync;
+  expect(g.calls.filter((c) => c.path === "profile").length).toBe(1);
+  expect(g.calls.filter((c) => c.path.startsWith("messages/")).length).toBe(300);
+}, 15_000);
+
+test("a tick after Gmail's limit stopped a sync waits the pause out instead of asking Gmail again", async () => {
+  const g = fake({ messages: 50, minuteMs: 400 });
+  g.blockedUntil = Date.now() + 60_000;
+  const id = connect();
+  await syncAccount(id);
+  expect(db.getAccount(id)).toMatchObject({ status: "limited", error: CATCHING_UP });
+  const refused = g.refused;
+
+  const next = syncAccount(id);
+  await Bun.sleep(150);
+  // still inside the pause the last refusal set: nothing was sent
+  expect(g.refused).toBe(refused);
+  g.blockedUntil = 0;
+  await next;
+  expect(db.getAccount(id)).toMatchObject({ status: "idle", error: null });
+  expect(g.inbox.filter((m) => !db.hasMessage(id, m))).toEqual([]);
+}, 15_000);
+
+test("tabs coming back sync at most once every 5 seconds between them", () => {
+  expect(syncSoon()).toBe(true);
+  expect(syncSoon()).toBe(false);
+});

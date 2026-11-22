@@ -91,6 +91,8 @@ export const api = {
   updateAccount: (id: string, patch: Partial<Pick<Account, "name" | "color">>) => req("PATCH", `/api/accounts/${id}`, patch),
   removeAccount: (id: string) => req("DELETE", `/api/accounts/${id}`),
   sync: (id: string) => req("POST", `/api/accounts/${id}/sync`),
+  /** Look for new mail in every account now; the server does it at most once every 5 s. */
+  syncAll: () => req("POST", "/api/sync"),
   threads: (p: { view: string; account?: string; q?: string; cursor?: string }) => {
     const s = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
     return req<{ threads: Thread[]; next: string | null }>("GET", `/api/threads?${s}`);

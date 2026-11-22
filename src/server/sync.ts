@@ -164,11 +164,22 @@ export function syncAccount(accountId: string): Promise<void> {
   return p;
 }
 
+/** Sync every connected account; one still syncing (or waiting out Gmail's limit) carries on rather than starting again. */
+export function syncAll() {
+  for (const a of listAccounts()) if (a.token) void syncAccount(a.id);
+}
+
+let lastNudge = 0;
+/** Sync now because someone is looking (a tab came back or reconnected), at most once every 5 s however many tabs ask. */
+export function syncSoon() {
+  if (Date.now() - lastNudge < 5_000) return false;
+  lastNudge = Date.now();
+  syncAll();
+  return true;
+}
+
 export function startSyncLoop(afterSync: () => void) {
   onSynced = afterSync;
-  const tick = () => {
-    for (const a of listAccounts()) if (a.token) void syncAccount(a.id);
-  };
-  tick();
-  return setInterval(tick, loadConfig().sync.intervalSec * 1000);
+  syncAll();
+  return setInterval(syncAll, loadConfig().sync.intervalSec * 1000);
 }

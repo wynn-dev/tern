@@ -11,7 +11,7 @@ import { randomId, seal, sign, verify } from "./crypto";
 import * as db from "./db";
 import { events } from "./events";
 import { authUrl, exchangeCode, gmail, redirectUri } from "./gmail";
-import { syncAccount } from "./sync";
+import { syncAccount, syncSoon } from "./sync";
 
 export type AppOptions = { demo: boolean; assets?: Record<string, string> };
 
@@ -165,6 +165,12 @@ export function createApp(opts: AppOptions) {
     return c.json({ ok: true });
   });
 
+  // a tab came back into view: check for new mail now rather than at the next tick
+  app.post("/api/sync", (c) => {
+    if (!opts.demo) syncSoon();
+    return c.json({ ok: true });
+  });
+
   // ---------- threads ----------
   app.get("/api/threads", (c) => {
     const q = c.req.query();
@@ -264,6 +270,8 @@ export function createApp(opts: AppOptions) {
       const off = events.on((e) => void stream.writeSSE({ data: JSON.stringify(e) }));
       // a first write flushes the response, so the browser sees the (re)connection right away
       void stream.writeSSE({ event: "ping", data: "" });
+      // a tab that just (re)connected may have missed mail: look for it now
+      if (!opts.demo) syncSoon();
       const ping = setInterval(() => void stream.writeSSE({ event: "ping", data: "" }), 25_000);
       stream.onAbort(() => {
         off();
