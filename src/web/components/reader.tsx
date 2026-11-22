@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArchiveIcon, ArrowLeftIcon, CheckCircle2Icon, ChevronDownIcon, DownloadIcon, ForwardIcon, InboxIcon, Loader2Icon, MailIcon, MailOpenIcon,
-  MoreHorizontalIcon, OctagonAlertIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, SparklesIcon, StarIcon, Trash2Icon, Undo2Icon, WandSparklesIcon,
+  MoreHorizontalIcon, OctagonAlertIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, SparklesIcon, StarIcon, Trash2Icon, Undo2Icon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
@@ -216,7 +216,6 @@ function AiCard({
       style={{ background: `linear-gradient(135deg, color-mix(in oklch, ${color} 7%, var(--card)), var(--card) 60%)` }}
     >
       <div className="flex items-center gap-2">
-        <SparklesIcon className="size-3.5" style={{ color }} />
         {thread.category && <CategoryChip category={thread.category} />}
         {thread.priority !== null && thread.priority >= 2 && (
           <span className="text-[11px] font-medium text-muted-foreground">{thread.priority === 3 ? "Act today" : "Soon"}</span>
@@ -224,7 +223,7 @@ function AiCard({
         <div className="flex-1" />
         {aiOn && !summary && (
           <button onClick={onSummarize} disabled={loading} className="flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60">
-            {loading ? <Loader2Icon className="size-3 animate-spin" /> : <WandSparklesIcon className="size-3" />}
+            {loading && <Loader2Icon className="size-3 animate-spin" />}
             {loading ? "Reading the thread…" : "Summarize"}
           </button>
         )}

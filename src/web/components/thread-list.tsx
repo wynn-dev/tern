@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertCircleIcon, HourglassIcon, Loader2Icon, PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
+import { AlertCircleIcon, HourglassIcon, Loader2Icon, PaperclipIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { prefetchThread, useAccounts, useThreads } from "@/hooks/data";
@@ -10,7 +10,7 @@ import { accountTrouble, CATCHING_UP, displayName, firstName, shortDate, signedO
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
-import { CategoryChip, categoryMeta, CATEGORY } from "./bits";
+import { CategoryChip, CATEGORY } from "./bits";
 import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
 
@@ -39,9 +39,9 @@ function participantsLabel(t: Thread, me: string | undefined) {
 export type LabelNames = Map<string, string>;
 
 const Row = memo(function Row({
-  t, account, selected, showCategory, labelNames, hideLabel, onSelect, onHover,
+  t, account, showAccount, selected, showCategory, labelNames, hideLabel, onSelect, onHover,
 }: {
-  t: Thread; account?: Account; selected: boolean; showCategory: boolean; labelNames: LabelNames; hideLabel?: string;
+  t: Thread; account?: Account; showAccount: boolean; selected: boolean; showCategory: boolean; labelNames: LabelNames; hideLabel?: string;
   onSelect: () => void; onHover: () => void;
 }) {
   const unread = !!t.unread;
@@ -60,18 +60,21 @@ const Row = memo(function Row({
         selected ? "bg-selected" : "hover:bg-accent/50",
       )}
     >
-      {account && <span className="absolute top-3 bottom-3 left-[6px] w-[3px] rounded-full opacity-80" style={{ background: account.color }} />}
       {unread && <span className="absolute top-[18px] left-[14px] size-1.5 rounded-full bg-brand" />}
       <div className="flex items-center gap-2">
         <span className={cn("truncate text-[13.5px]", unread ? "font-semibold text-foreground" : "font-medium text-foreground/80")}>
           {participantsLabel(t, account?.email)}
         </span>
         {t.count > 1 && <span className="font-mono text-[11px] text-muted-foreground">{t.count}</span>}
-        {!!t.needs_reply && <span className="rounded-full bg-amber-500/12 px-1.5 text-[10.5px] font-medium text-amber-800 dark:text-amber-400">Reply</span>}
+        {!!t.needs_reply && <span className="rounded bg-amber-500/12 px-1 text-[10.5px] leading-4 font-medium text-amber-800 dark:text-amber-400">Reply</span>}
         <span className="flex-1" />
         {!!t.has_attachments && <PaperclipIcon className="size-3 text-muted-foreground" />}
         {!!t.starred && <StarIcon className="size-3 fill-amber-400 text-amber-400" />}
         {showCategory && t.category && <CategoryChip category={t.category} />}
+        {/* whose mail, in All accounts: a square by the time, so it never reads as the round unread dot */}
+        {showAccount && account && (
+          <span role="img" aria-label={account.email} title={account.email} className="size-[7px] shrink-0 rounded-[2px]" style={{ background: account.color }} />
+        )}
         <span className={cn("shrink-0 text-[11.5px] tabular-nums", unread ? "text-foreground" : "text-muted-foreground")}>{shortDate(t.last_date)}</span>
       </div>
       <div className="flex min-w-0 items-center gap-1.5">
@@ -84,14 +87,7 @@ const Row = memo(function Row({
         {labels.length > 2 && <span className="shrink-0 text-[10.5px] text-muted-foreground">+{labels.length - 2}</span>}
       </div>
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted-foreground">
-        {t.summary ? (
-          <>
-            <SparklesIcon className="size-3 shrink-0" style={{ color: categoryMeta(t.category).color }} />
-            <span className="truncate">{t.summary}</span>
-          </>
-        ) : (
-          <span className="truncate">{t.snippet}</span>
-        )}
+        <span className="truncate">{t.summary || t.snippet}</span>
       </div>
     </button>
   );
@@ -188,6 +184,7 @@ export function ThreadList() {
                   <Row
                     t={t}
                     account={multi ? accounts.get(t.account_id) : undefined}
+                    showAccount={!account}
                     selected={key === selected}
                     showCategory={!view.startsWith("category:")}
                     labelNames={labelNames}
