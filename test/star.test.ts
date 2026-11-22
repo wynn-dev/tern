@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const dir = mkdtempSync(join(tmpdir(), "tern-actions-"));
+const dir = mkdtempSync(join(tmpdir(), "tern-star-"));
 process.env.TERN_HOME = dir;
 const db = await import("../src/server/db");
 const { applyAction } = await import("../src/server/actions");
