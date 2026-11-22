@@ -1,9 +1,10 @@
 name: CI
 
+# Pushes to main run these same checks through release.yml, which publishes
+# the edge release only once they pass.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
 
 jobs:
   test:
@@ -11,6 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: bun run typecheck
