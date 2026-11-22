@@ -1,9 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon, PlusIcon, RefreshCwIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useAccounts } from "@/hooks/data";
-import { api } from "@/lib/api";
+import { type ThemePref, useTheme } from "@/hooks/theme";
+import { type Account, api, type Settings } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
@@ -15,6 +16,35 @@ const MODELS = [
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5 — balanced" },
   { id: "claude-opus-5-5", label: "Opus 5.5 — best writing" },
 ];
+
+const THEMES: { pref: ThemePref; label: string }[] = [
+  { pref: "light", label: "Light" },
+  { pref: "dark", label: "Dark" },
+  { pref: "system", label: "System" },
+];
+
+/**
+ * Ask every account to sync, and say so. The server syncs in the background,
+ * so this confirms the sync started; new mail streams in as it lands.
+ */
+export function checkForMail(accounts: Account[], qc: QueryClient) {
+  if (!accounts.length) return void toast("No accounts yet", { description: "Add a Gmail account in Settings." });
+  toast.promise(
+    Promise.all(accounts.map((a) => api.sync(a.id))).finally(() => qc.invalidateQueries({ queryKey: ["accounts"] })),
+    {
+      loading: "Checking for new mail…",
+      success: accounts.length === 1 ? `Checking ${accounts[0].email} for new mail` : `Checking ${accounts.length} accounts for new mail`,
+      error: (e: Error) => `Couldn't check for new mail: ${e.message}`,
+    },
+  );
+}
+
+/** After an account is gone: stop showing it, or a view filtered to it sits empty with nothing to say why. */
+export function forgetAccount(id: string) {
+  const { view, account, selected, setView, select } = useStore.getState();
+  if (account === id) setView(view, null);
+  else if (selected?.startsWith(`${id}:`)) select(null);
+}
 
 export function SettingsDialog() {
   const { settingsOpen, set } = useStore();
@@ -63,45 +93,27 @@ function SettingsBody() {
     },
     onError: (e) => toast.error(e.message),
   });
-  const remove = useMutation({
-    mutationFn: (id: string) => api.removeAccount(id),
-    onSuccess: () => qc.invalidateQueries(),
-  });
   const saveAi = useMutation({
-    mutationFn: (ai: Parameters<typeof api.saveSettings>[0]["ai"]) => api.saveSettings({ ai }),
-    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["ai-status"] })]),
+    mutationFn: (ai: Partial<Settings["ai"]>) => api.saveSettings({ ai }),
+    // show the change at once, and put it back if the save fails so nothing looks saved that isn't
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: ["settings"] });
+      const prev = qc.getQueryData<Settings>(["settings"]);
+      if (prev) qc.setQueryData<Settings>(["settings"], { ...prev, ai: { ...prev.ai, ...patch } });
+      return { prev };
+    },
+    onError: (e, _, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["settings"], ctx.prev);
+      toast.error(`Couldn't save the AI settings: ${e.message}`);
+    },
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["ai-status"] })]),
   });
 
   return (
     <div className="space-y-7">
       <Section title="Accounts" hint="Every account syncs on its own and lands in one unified inbox.">
         <div className="divide-y rounded-lg border">
-          {accts?.accounts.map((a) => (
-            <div key={a.id} className="flex items-center gap-3 px-3 py-2.5">
-              <span className="size-2 rounded-full" style={{ background: a.color }} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-medium">{a.email}</div>
-                <div className={cn("text-[12px]", a.status === "error" ? "text-destructive" : "text-muted-foreground")}>
-                  {a.status === "error" ? a.error : a.status === "syncing" ? "Syncing…" : "Up to date"}
-                </div>
-              </div>
-              {a.status === "error" && (
-                <Button size="sm" variant="outline" onClick={() => connect.mutate()}>
-                  Reconnect
-                </Button>
-              )}
-              <Button size="icon-sm" variant="ghost" onClick={() => api.sync(a.id)}>
-                <RefreshCwIcon className="!size-3.5" />
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => confirm(`Remove ${a.email} from Tern? Its mail is deleted from Tern only, never from Gmail.`) && remove.mutate(a.id)}
-              >
-                <Trash2Icon className="!size-3.5" />
-              </Button>
-            </div>
-          ))}
+          {accts?.accounts.map((a) => <AccountRow key={a.id} account={a} onReconnect={() => connect.mutate()} />)}
           {!accts?.accounts.length && <div className="px-3 py-4 text-[13px] text-muted-foreground">No accounts yet.</div>}
         </div>
         <Button onClick={() => connect.mutate()} disabled={connect.isPending || session?.demo || !settings?.google.configured}>
@@ -123,6 +135,8 @@ function SettingsBody() {
       </Section>
 
       {!session?.demo && <GoogleSection settings={settings} />}
+
+      <AppearanceSection />
 
       <Section title="AI" hint="Runs through Claude Code on this machine, on your Claude subscription. Mail goes only to Claude.">
         <div className="space-y-3 rounded-lg border p-3">
@@ -156,6 +170,77 @@ function SettingsBody() {
   );
 }
 
+function AccountRow({ account: a, onReconnect }: { account: Account; onReconnect: () => void }) {
+  const qc = useQueryClient();
+  const sync = useMutation({
+    mutationFn: () => api.sync(a.id),
+    onSuccess: () => toast.success(`Checking ${a.email} for new mail`),
+    onError: (e) => toast.error(`Couldn't check ${a.email}: ${e.message}`),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.removeAccount(a.id),
+    onSuccess: () => {
+      forgetAccount(a.id);
+      toast.success(`Removed ${a.email}`, { description: "Its mail is gone from Tern. Gmail still has it." });
+      return qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(`Couldn't remove ${a.email}: ${e.message}`),
+  });
+  const syncing = sync.isPending || a.status === "syncing";
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5">
+      <span className="size-2 rounded-full" style={{ background: a.color }} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium">{a.email}</div>
+        <div className={cn("text-[12px]", a.status === "error" ? "text-destructive" : "text-muted-foreground")}>
+          {a.status === "error" ? a.error : syncing ? "Syncing…" : "Up to date"}
+        </div>
+      </div>
+      {a.status === "error" && (
+        <Button size="sm" variant="outline" onClick={onReconnect}>
+          Reconnect
+        </Button>
+      )}
+      <Button size="icon-sm" variant="ghost" disabled={sync.isPending} onClick={() => sync.mutate()}>
+        <RefreshCwIcon className={cn("!size-3.5", syncing && "animate-spin")} />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        disabled={remove.isPending}
+        onClick={() => confirm(`Remove ${a.email} from Tern? Its mail is deleted from Tern only, never from Gmail.`) && remove.mutate()}
+      >
+        {remove.isPending ? <Loader2Icon className="!size-3.5 animate-spin" /> : <Trash2Icon className="!size-3.5" />}
+      </Button>
+    </div>
+  );
+}
+
+function AppearanceSection() {
+  const { pref, setPref } = useTheme();
+  return (
+    <Section title="Appearance" hint="System follows your computer's light or dark setting as it changes.">
+      <div role="radiogroup" aria-label="Theme" className="inline-flex rounded-lg border p-0.5">
+        {THEMES.map((t) => (
+          <button
+            key={t.pref}
+            role="radio"
+            aria-checked={pref === t.pref}
+            onClick={() => setPref(t.pref)}
+            className={cn(
+              "h-7 rounded-md px-3 text-[13px] font-medium text-muted-foreground transition-colors duration-100 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              pref === t.pref && "bg-accent text-foreground",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function GoogleSection({ settings }: { settings?: Awaited<ReturnType<typeof api.settings>> }) {
   const qc = useQueryClient();
   const [id, setId] = useState("");
@@ -168,6 +253,7 @@ function GoogleSection({ settings }: { settings?: Awaited<ReturnType<typeof api.
       setSecret("");
       void qc.invalidateQueries({ queryKey: ["settings"] });
     },
+    onError: (e) => toast.error(`Couldn't save the Google connection: ${e.message}`),
   });
   if (!settings) return null;
   return (
