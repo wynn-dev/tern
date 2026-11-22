@@ -62,8 +62,13 @@ export function saveConfig(cfg: Config) {
   chmodSync(configPath(), 0o600);
 }
 
+// where this process actually listens: `tern serve --port/--host` override the config file
+let serving: { hostname: string; port: number } | null = null;
+export const setServeAddress = (addr: { hostname: string; port: number }) => void (serving = addr);
+
 export function publicUrl(cfg: Config): string {
   if (cfg.publicUrl) return cfg.publicUrl.replace(/\/$/, "");
-  const host = cfg.host === "0.0.0.0" || cfg.host === "::" ? "localhost" : cfg.host;
-  return `http://${host === "127.0.0.1" ? "localhost" : host}:${cfg.port}`;
+  const h = serving?.hostname ?? cfg.host;
+  const host = h === "0.0.0.0" || h === "::" ? "localhost" : h;
+  return `http://${host === "127.0.0.1" ? "localhost" : host}:${serving?.port ?? cfg.port}`;
 }

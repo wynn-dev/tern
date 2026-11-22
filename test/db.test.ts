@@ -64,3 +64,54 @@ test("paging walks every thread even when many share a timestamp", () => {
   const dates = seen.map((id) => 1_000 + (Number(id.slice(1)) % 20));
   expect(dates).toEqual([...dates].sort((a, b) => b - a));
 });
+
+test("replying takes a thread out of Needs reply, and the AI can't put it back", () => {
+  db.upsertAccount({ id: "r", email: "Me@Reply.io", name: "Me", token: null });
+  const base = { account_id: "r", thread_id: "rt", to: [], cc: [], html: "", references: "", attachments: [], snippet: "", text: "", message_id: "" };
+  db.upsertMessages([{ ...base, id: "r1", internal_date: 1, from_name: "Linda", from_email: "linda@x.io", subject: "Sunday dinner?", labels: ["INBOX", "UNREAD"] }]);
+  db.setThreadAi("r", "rt", { category: "personal", priority: 2, summary: "Dinner?", needs_reply: true });
+  expect(db.queryThreads({ view: "needs-reply", account: "r" })).toHaveLength(1);
+  expect(db.counts().accounts.r.needsReply).toBe(1);
+
+  db.upsertMessages([{ ...base, id: "r2", internal_date: 2, from_name: "Me", from_email: "me@reply.io", subject: "Re: Sunday dinner?", labels: ["SENT"] }]);
+  expect(db.getThread("r", "rt")!.thread.needs_reply).toBe(0);
+  expect(db.queryThreads({ view: "needs-reply", account: "r" })).toHaveLength(0);
+  expect(db.counts().accounts.r.needsReply).toBe(0);
+  // the reply cleared ai_at, so triage runs again; its verdict can't re-flag a thread you answered last
+  db.setThreadAi("r", "rt", { category: "personal", priority: 2, summary: "You said yes", needs_reply: true });
+  expect(db.getThread("r", "rt")!.thread.needs_reply).toBe(0);
+
+  // a new message from them makes it theirs again
+  db.upsertMessages([{ ...base, id: "r3", internal_date: 3, from_name: "Linda", from_email: "linda@x.io", subject: "Re: Sunday dinner?", labels: ["INBOX"] }]);
+  db.setThreadAi("r", "rt", { category: "personal", priority: 2, summary: "Bring wine?", needs_reply: true });
+  expect(db.getThread("r", "rt")!.thread.needs_reply).toBe(1);
+});
+
+test("Starred and Needs reply leave out spam", () => {
+  db.upsertAccount({ id: "sp", email: "spam@x.io", name: "Spam", token: null });
+  const base = { account_id: "sp", from_name: "X", from_email: "x@spam.io", to: [], cc: [], html: "", references: "", attachments: [], snippet: "", text: "", message_id: "" };
+  db.upsertMessages([
+    { ...base, id: "s1", thread_id: "st1", internal_date: 1, subject: "Starred spam", labels: ["SPAM", "STARRED"] },
+    { ...base, id: "s2", thread_id: "st2", internal_date: 2, subject: "Spam that wants a reply", labels: ["SPAM", "INBOX"] },
+  ]);
+  db.setThreadAi("sp", "st2", { category: "work", priority: 1, summary: "", needs_reply: true });
+  expect(db.queryThreads({ view: "starred", account: "sp" })).toHaveLength(0);
+  expect(db.queryThreads({ view: "needs-reply", account: "sp" })).toHaveLength(0);
+  expect(db.counts().accounts.sp.needsReply).toBe(0);
+  expect(db.queryThreads({ view: "spam", account: "sp" })).toHaveLength(2);
+});
+
+test("category counts are kept per account, too", () => {
+  db.upsertAccount({ id: "c1", email: "c1@x.io", name: "C1", token: null });
+  db.upsertAccount({ id: "c2", email: "c2@x.io", name: "C2", token: null });
+  const msg = (account_id: string, id: string) => ({
+    id, account_id, thread_id: id, internal_date: 5, from_name: "Bo", from_email: "bo@x.io", to: [], cc: [], subject: id, snippet: "",
+    text: "", html: "", labels: ["INBOX", "UNREAD"], message_id: "", references: "", attachments: [],
+  });
+  db.upsertMessages([msg("c1", "w1"), msg("c1", "w2"), msg("c2", "w3")]);
+  for (const [a, t] of [["c1", "w1"], ["c1", "w2"], ["c2", "w3"]]) db.setThreadAi(a, t, { category: "travel", priority: 1, summary: "", needs_reply: false });
+  const c = db.counts();
+  expect(c.categories.travel).toBe(3);
+  expect(c.accounts.c1.categories).toEqual({ travel: 2 });
+  expect(c.accounts.c2.categories).toEqual({ travel: 1 });
+});

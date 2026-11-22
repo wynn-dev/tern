@@ -1,9 +1,10 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { HTTPException } from "hono/http-exception";
 import { streamSSE } from "hono/streaming";
 import { existsSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
-import { ACTIONS, applyAction, send, SendError, type Action } from "./actions";
+import { ACTIONS, applyAction, send, SendError, type Action, type SendInput } from "./actions";
 import { AiError, aiStatus, classifyPending, draftReply, summarizeThread } from "./ai";
 import { loadConfig, saveConfig, type Config } from "./config";
 import { randomId, sign, verify } from "./crypto";
@@ -20,6 +21,26 @@ const MIME: Record<string, string> = {
 };
 
 const pendingOAuth = new Map<string, number>();
+
+/** A mistake in the request: its status and a message the UI can show as is. Anything else that throws is a fault, a 500. */
+const fail = (status: 400 | 404, error: string) => new HTTPException(status, { message: error });
+
+async function body<T>(c: Context): Promise<Partial<T>> {
+  const v = await c.req.json().catch(() => {
+    throw fail(400, "Expected a JSON body");
+  });
+  if (!v || typeof v !== "object" || Array.isArray(v)) throw fail(400, "Expected a JSON object");
+  return v;
+}
+
+const needAccount = (id: unknown) => {
+  const a = typeof id === "string" ? db.getAccount(id) : null;
+  if (!a) throw fail(404, "No such account");
+  return a;
+};
+const needThread = (accountId: unknown, threadId: unknown) => {
+  if (typeof accountId !== "string" || typeof threadId !== "string" || !db.hasThread(accountId, threadId)) throw fail(404, "No such conversation");
+};
 
 export function createApp(opts: AppOptions) {
   const app = new Hono();
@@ -42,9 +63,9 @@ export function createApp(opts: AppOptions) {
   app.get("/api/session", (c) => c.json({ authed: authed(c), passwordRequired: !!loadConfig().passwordHash, demo: opts.demo }));
 
   app.post("/api/login", async (c) => {
-    const { password } = await c.req.json<{ password: string }>();
+    const { password } = await body<{ password: string }>(c);
     const hash = loadConfig().passwordHash;
-    if (!hash || !(await Bun.password.verify(password ?? "", hash))) {
+    if (!hash || !(await Bun.password.verify(typeof password === "string" ? password : "", hash))) {
       await Bun.sleep(400);
       return c.json({ error: "Wrong password" }, 401);
     }
@@ -77,7 +98,7 @@ export function createApp(opts: AppOptions) {
 
   async function completeOAuth(code: string | null, state: string | null) {
     const started = state ? pendingOAuth.get(state) : undefined;
-    if (!code || !state || !started || Date.now() - started > 15 * 60_000) throw new Error("This sign-in link expired. Start again.");
+    if (!code || !state || !started || Date.now() - started > 15 * 60_000) throw fail(400, "This sign-in link expired. Start again.");
     pendingOAuth.delete(state);
     const { email, name, token } = await exchangeCode(code);
     const acc = db.upsertAccount({ id: randomId(8), email, name, token });
@@ -98,26 +119,33 @@ export function createApp(opts: AppOptions) {
 
   // for setups where Google can't redirect back to Tern (remote server, no https): paste the URL
   app.post("/api/accounts/complete", async (c) => {
-    const { url } = await c.req.json<{ url: string }>();
-    const u = new URL(url);
+    const { url } = await body<{ url: string }>(c);
+    const u = URL.parse(typeof url === "string" ? url.trim() : "");
+    if (!u) throw fail(400, "That isn't a sign-in URL. Copy the whole address from the browser's address bar.");
     const acc = await completeOAuth(u.searchParams.get("code"), u.searchParams.get("state"));
     return c.json({ account: publicAccount(acc) });
   });
 
   app.patch("/api/accounts/:id", async (c) => {
-    const body = await c.req.json<{ name?: string; color?: string }>();
-    db.updateAccount(c.req.param("id"), { ...(body.name !== undefined && { name: body.name }), ...(body.color && { color: body.color }) });
+    needAccount(c.req.param("id"));
+    const patch = await body<{ name: string; color: string }>(c);
+    db.updateAccount(c.req.param("id"), {
+      ...(typeof patch.name === "string" && { name: patch.name }),
+      ...(typeof patch.color === "string" && patch.color && { color: patch.color }),
+    });
     events.emit({ type: "account", accountId: c.req.param("id") });
     return c.json({ ok: true });
   });
 
   app.delete("/api/accounts/:id", (c) => {
+    needAccount(c.req.param("id"));
     db.deleteAccount(c.req.param("id"));
     events.emit({ type: "account", accountId: c.req.param("id") });
     return c.json({ ok: true });
   });
 
   app.post("/api/accounts/:id/sync", (c) => {
+    needAccount(c.req.param("id"));
     if (!opts.demo) void syncAccount(c.req.param("id"));
     return c.json({ ok: true });
   });
@@ -126,6 +154,8 @@ export function createApp(opts: AppOptions) {
   app.get("/api/threads", (c) => {
     const q = c.req.query();
     const limit = Math.min(Number(q.limit ?? 60), 200);
+    if (!Number.isInteger(limit) || limit < 1) throw fail(400, "limit must be a whole number above 0");
+    if (q.cursor && !db.parseCursor(q.cursor)) throw fail(400, "Bad paging cursor. Load the list again from the top.");
     const threads = db.queryThreads({ view: q.view ?? "inbox", account: q.account || undefined, q: q.q || undefined, cursor: q.cursor || undefined, limit });
     return c.json({ threads, next: threads.length === limit ? db.threadCursor(threads.at(-1)!) : null });
   });
@@ -137,7 +167,8 @@ export function createApp(opts: AppOptions) {
 
   app.post("/api/threads/:account/:thread/:action", async (c) => {
     const action = c.req.param("action") as Action;
-    if (!ACTIONS.includes(action)) return c.json({ error: "Unknown action" }, 400);
+    if (!ACTIONS.includes(action)) throw fail(400, "Unknown action");
+    needThread(c.req.param("account"), c.req.param("thread"));
     await applyAction(c.req.param("account"), c.req.param("thread"), action, opts.demo);
     return c.json({ ok: true });
   });
@@ -155,17 +186,23 @@ export function createApp(opts: AppOptions) {
     });
   });
 
-  app.post("/api/send", async (c) => c.json(await send(await c.req.json(), opts.demo)));
+  app.post("/api/send", async (c) => {
+    const input = await body<SendInput>(c);
+    needAccount(input.accountId);
+    return c.json(await send(input as SendInput, opts.demo));
+  });
 
   // ---------- AI ----------
   app.get("/api/ai/status", (c) => c.json(aiStatus()));
   app.post("/api/ai/summarize", async (c) => {
-    const { accountId, threadId } = await c.req.json<{ accountId: string; threadId: string }>();
-    return c.json(await summarizeThread(accountId, threadId));
+    const { accountId, threadId } = await body<{ accountId: string; threadId: string }>(c);
+    needThread(accountId, threadId);
+    return c.json(await summarizeThread(accountId!, threadId!));
   });
   app.post("/api/ai/draft", async (c) => {
-    const { accountId, threadId, instruction } = await c.req.json<{ accountId: string; threadId: string; instruction?: string }>();
-    return c.json(await draftReply(accountId, threadId, instruction ?? ""));
+    const { accountId, threadId, instruction } = await body<{ accountId: string; threadId: string; instruction: string }>(c);
+    needThread(accountId, threadId);
+    return c.json(await draftReply(accountId!, threadId!, typeof instruction === "string" ? instruction : ""));
   });
   app.post("/api/ai/classify", (c) => {
     if (!loadConfig().ai.enabled) return c.json({ error: "AI is turned off in Settings.", code: "off" }, 409);
@@ -185,10 +222,10 @@ export function createApp(opts: AppOptions) {
   });
 
   app.put("/api/settings", async (c) => {
-    const body = await c.req.json<{ google?: { clientId: string; clientSecret: string }; ai?: Partial<Config["ai"]> }>();
+    const patch = await body<{ google: { clientId: string; clientSecret: string }; ai: Partial<Config["ai"]> }>(c);
     const cfg = loadConfig();
-    if (body.google?.clientId) cfg.google = { clientId: body.google.clientId.trim(), clientSecret: body.google.clientSecret?.trim() || cfg.google?.clientSecret || "" };
-    if (body.ai) cfg.ai = { ...cfg.ai, ...body.ai };
+    if (patch.google?.clientId) cfg.google = { clientId: patch.google.clientId.trim(), clientSecret: patch.google.clientSecret?.trim() || cfg.google?.clientSecret || "" };
+    if (patch.ai) cfg.ai = { ...cfg.ai, ...patch.ai };
     saveConfig(cfg);
     return c.json({ ok: true });
   });
@@ -209,6 +246,7 @@ export function createApp(opts: AppOptions) {
   );
 
   app.onError((err, c) => {
+    if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
     if (err instanceof AiError) return c.json({ error: err.message, code: err.code }, err.httpStatus);
     if (err instanceof SendError) return c.json({ error: err.message }, 400);
     console.error(`[api] ${c.req.method} ${c.req.path}:`, err.message);

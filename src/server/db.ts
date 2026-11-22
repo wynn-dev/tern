@@ -280,7 +280,17 @@ export function hasMessage(accountId: string, id: string) {
   return !!db.query("SELECT 1 FROM messages WHERE account_id = ? AND id = ?").get(accountId, id);
 }
 
-/** Recompute a thread's summary row from its messages; drops it when none are left. */
+/** The account wrote this message: Gmail filed it as sent, or it's from the account's own address. */
+const fromMe = (m: Pick<Message, "from_email" | "labels">, email: string | undefined) =>
+  m.labels.includes("SENT") || (!!email && m.from_email.toLowerCase() === email.toLowerCase());
+
+const accountEmail = (accountId: string) =>
+  (db.query("SELECT email FROM accounts WHERE id = ?").get(accountId) as { email: string } | null)?.email;
+
+/**
+ * Recompute a thread's summary row from its messages; drops it when none are left.
+ * A thread whose last message is the account's own has been answered, so it leaves Needs reply.
+ */
 export function rebuildThread(accountId: string, threadId: string) {
   const rows = db
     .query("SELECT * FROM messages WHERE account_id = ? AND thread_id = ? ORDER BY internal_date")
@@ -296,6 +306,7 @@ export function rebuildThread(accountId: string, threadId: string) {
   for (const m of msgs) if (m.from_email && !seen.has(m.from_email)) seen.set(m.from_email, { name: m.from_name, email: m.from_email });
   const any = (l: string) => (msgs.some((m) => m.labels.includes(l)) ? 1 : 0);
   const every = (l: string) => (msgs.every((m) => m.labels.includes(l)) ? 1 : 0);
+  const answered = fromMe(last, accountEmail(accountId)) ? 1 : 0;
   db.query(`
     INSERT INTO threads (account_id, thread_id, subject, snippet, last_date, participants, count, unread, starred, in_inbox, in_sent, in_trash, in_spam, has_attachments, labels)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -303,11 +314,12 @@ export function rebuildThread(accountId: string, threadId: string) {
       subject = excluded.subject, snippet = excluded.snippet, last_date = excluded.last_date, participants = excluded.participants,
       count = excluded.count, unread = excluded.unread, starred = excluded.starred, in_inbox = excluded.in_inbox, in_sent = excluded.in_sent,
       in_trash = excluded.in_trash, in_spam = excluded.in_spam, has_attachments = excluded.has_attachments, labels = excluded.labels,
-      ai_at = CASE WHEN threads.last_date < excluded.last_date THEN NULL ELSE threads.ai_at END
+      ai_at = CASE WHEN threads.last_date < excluded.last_date THEN NULL ELSE threads.ai_at END,
+      needs_reply = CASE WHEN ? THEN 0 ELSE threads.needs_reply END
   `).run(
     accountId, threadId, msgs[0].subject || last.subject, last.snippet, last.internal_date, JSON.stringify([...seen.values()].slice(0, 6)),
     msgs.length, any("UNREAD"), any("STARRED"), any("INBOX"), any("SENT"), every("TRASH"), any("SPAM"),
-    msgs.some((m) => m.attachments.length) ? 1 : 0, JSON.stringify([...all]),
+    msgs.some((m) => m.attachments.length) ? 1 : 0, JSON.stringify([...all]), answered,
   );
 }
 
@@ -323,7 +335,7 @@ export type ThreadQuery = { view: string; account?: string; q?: string; cursor?:
 export const threadCursor = (t: Pick<Thread, "last_date" | "account_id" | "thread_id">) =>
   Buffer.from(JSON.stringify([t.last_date, t.account_id, t.thread_id])).toString("base64url");
 
-function parseCursor(c: string): [number, string, string] | null {
+export function parseCursor(c: string): [number, string, string] | null {
   try {
     const v = JSON.parse(Buffer.from(c, "base64url").toString());
     return Array.isArray(v) && typeof v[0] === "number" && typeof v[1] === "string" && typeof v[2] === "string" ? [v[0], v[1], v[2]] : null;
@@ -336,12 +348,12 @@ export function queryThreads({ view, account, q, cursor, limit = 60 }: ThreadQue
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (view === "inbox") where.push("t.in_inbox = 1 AND t.in_trash = 0 AND t.in_spam = 0");
-  else if (view === "starred") where.push("t.starred = 1 AND t.in_trash = 0");
+  else if (view === "starred") where.push("t.starred = 1 AND t.in_trash = 0 AND t.in_spam = 0");
   else if (view === "sent") where.push("t.in_sent = 1 AND t.in_trash = 0");
   else if (view === "trash") where.push("t.in_trash = 1");
   else if (view === "spam") where.push("t.in_spam = 1");
   else if (view === "all") where.push("t.in_trash = 0 AND t.in_spam = 0");
-  else if (view === "needs-reply") where.push("t.needs_reply = 1 AND t.in_inbox = 1 AND t.in_trash = 0");
+  else if (view === "needs-reply") where.push("t.needs_reply = 1 AND t.in_inbox = 1 AND t.in_trash = 0 AND t.in_spam = 0");
   else if (view.startsWith("category:")) {
     where.push("t.category = ? AND t.in_inbox = 1 AND t.in_trash = 0 AND t.in_spam = 0");
     args.push(view.slice(9));
@@ -379,6 +391,9 @@ function ftsQuery(q: string) {
     .join(" ");
 }
 
+export const hasThread = (accountId: string, threadId: string) =>
+  !!db.query("SELECT 1 FROM threads WHERE account_id = ? AND thread_id = ?").get(accountId, threadId);
+
 export function getThread(accountId: string, threadId: string): { thread: Thread; messages: Message[] } | null {
   const t = db.query("SELECT * FROM threads WHERE account_id = ? AND thread_id = ?").get(accountId, threadId) as ThreadRow | null;
   if (!t) return null;
@@ -392,21 +407,32 @@ export function threadMessages(accountId: string, threadId: string): Message[] {
   return (db.query("SELECT * FROM messages WHERE account_id = ? AND thread_id = ? ORDER BY internal_date").all(accountId, threadId) as MessageRow[]).map(toMessage);
 }
 
-export function counts() {
+export type Counts = {
+  accounts: Record<string, { inboxUnread: number; needsReply: number; categories: Record<string, number> }>;
+  /** Unread per smart view across all accounts; each account's own are in `accounts[id].categories`. */
+  categories: Record<string, number>;
+};
+
+export function counts(): Counts {
   const rows = db.query(`
     SELECT account_id,
       SUM(CASE WHEN in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND unread = 1 THEN 1 ELSE 0 END) AS inbox_unread,
-      SUM(CASE WHEN in_inbox = 1 AND in_trash = 0 AND needs_reply = 1 THEN 1 ELSE 0 END) AS needs_reply
+      SUM(CASE WHEN in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND needs_reply = 1 THEN 1 ELSE 0 END) AS needs_reply
     FROM threads GROUP BY account_id
   `).all() as { account_id: string; inbox_unread: number; needs_reply: number }[];
   const cats = db.query(`
-    SELECT category, COUNT(*) AS n FROM threads
-    WHERE category IS NOT NULL AND in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND unread = 1 GROUP BY category
-  `).all() as { category: string; n: number }[];
-  return {
-    accounts: Object.fromEntries(rows.map((r) => [r.account_id, { inboxUnread: r.inbox_unread, needsReply: r.needs_reply }])),
-    categories: Object.fromEntries(cats.map((c) => [c.category, c.n])),
+    SELECT account_id, category, COUNT(*) AS n FROM threads
+    WHERE category IS NOT NULL AND in_inbox = 1 AND in_trash = 0 AND in_spam = 0 AND unread = 1 GROUP BY account_id, category
+  `).all() as { account_id: string; category: string; n: number }[];
+  const out: Counts = {
+    accounts: Object.fromEntries(rows.map((r) => [r.account_id, { inboxUnread: r.inbox_unread, needsReply: r.needs_reply, categories: {} }])),
+    categories: {},
   };
+  for (const c of cats) {
+    out.categories[c.category] = (out.categories[c.category] ?? 0) + c.n;
+    out.accounts[c.account_id].categories[c.category] = c.n;
+  }
+  return out;
 }
 
 /** Inbox threads from the last `days` days the AI hasn't looked at since their last message. */
@@ -416,8 +442,14 @@ export function unclassifiedThreads(limit: number, days = 14): Thread[] {
 }
 
 export function setThreadAi(accountId: string, threadId: string, ai: { category: string; priority: number; summary: string; needs_reply: boolean }) {
+  // the AI reads the whole thread and can still say "reply"; a thread you answered last isn't waiting on you
+  const last = ai.needs_reply
+    ? (db.query("SELECT from_email, labels FROM messages WHERE account_id = ? AND thread_id = ? ORDER BY internal_date DESC LIMIT 1")
+        .get(accountId, threadId) as { from_email: string; labels: string } | null)
+    : null;
+  const needsReply = ai.needs_reply && !(last && fromMe({ from_email: last.from_email, labels: JSON.parse(last.labels) }, accountEmail(accountId)));
   db.query("UPDATE threads SET category = ?, priority = ?, summary = ?, needs_reply = ?, ai_at = ? WHERE account_id = ? AND thread_id = ?").run(
-    ai.category, ai.priority, ai.summary, ai.needs_reply ? 1 : 0, Date.now(), accountId, threadId,
+    ai.category, ai.priority, ai.summary, needsReply ? 1 : 0, Date.now(), accountId, threadId,
   );
 }
 
