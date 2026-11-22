@@ -71,7 +71,8 @@ export function syncStoreWithUrl() {
     if (pending !== undefined) history.replaceState({ from: from() }, "", pending);
     pending = undefined;
   };
-  history.replaceState({ from: from() }, "", formatRoute(current));
+  // the Google sign-in redirect's ?connected / ?error are Mail's to read and clear
+  if (!/[?&](connected|error)=/.test(location.search)) history.replaceState({ from: from() }, "", formatRoute(current));
 
   useStore.subscribe((s) => {
     if (applying) return;
