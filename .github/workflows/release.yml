@@ -1,0 +1,59 @@
+name: Release
+
+# Every push to main that passes CI rebuilds the rolling `edge` prerelease,
+# which install.sh downloads from.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# one publish at a time; a newer push waits for the running one, then wins
+concurrency:
+  group: release-edge
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  edge:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+
+      # what `bun run build` does, once per target
+      - name: Build
+        run: |
+          bun run build:web
+          bun run build:embed
+          mkdir -p dist/release
+          for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            bun build --compile --minify --target="bun-$target" src/cli/main.ts --outfile "dist/release/tern-$target"
+          done
+          cd dist/release && sha256sum tern-* > checksums.txt && cat checksums.txt
+
+      - name: Smoke test
+        run: dist/release/tern-linux-x64 version
+
+      - name: Publish edge
+        run: |
+          git tag -f edge "$GITHUB_SHA"
+          git push -f origin refs/tags/edge
+          notes="Rolling build of main at ${GITHUB_SHA}.
+
+          Install or update: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`"
+          if gh release view edge >/dev/null 2>&1; then
+            gh release edit edge --prerelease --title "edge" --notes "$notes"
+          else
+            gh release create edge --prerelease --title "edge" --notes "$notes" --verify-tag
+          fi
+          gh release upload edge dist/release/* --clobber

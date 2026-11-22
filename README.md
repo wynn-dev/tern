@@ -11,6 +11,14 @@ A fast, quiet, self-hosted mail client for all your Gmail accounts at once, with
 ## Install
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/wynn-dev/tern/main/install.sh | sh
+```
+
+This downloads the prebuilt binary for your machine (Linux or macOS, x64 or arm64) from the rolling [`edge` release](https://github.com/wynn-dev/tern/releases/tag/edge), which is rebuilt from every push to `main`. It checks the binary against `checksums.txt`, puts it at `~/.local/bin/tern` and runs `tern install`, which starts the background service. Run the same line again to update. To only install the binary, set `TERN_SKIP_SETUP=1`.
+
+Or build from source with [Bun](https://bun.sh):
+
+```sh
 bun install
 bun run build          # → dist/tern, a single self-contained binary
 ./dist/tern install    # installs ~/.local/bin/tern and starts the service
@@ -58,6 +66,15 @@ bun run demo           # server with three fake accounts on :7420, no Google nee
 bun run dev:web        # Vite on :5173, proxies /api to :7420
 bun test
 bun run typecheck
+```
+
+To test `install.sh` without a release, build a binary, serve it with its checksums and point the script at that server:
+
+```sh
+bun run build:web && bun run build:embed
+bun build --compile --minify --target=bun-linux-x64 src/cli/main.ts --outfile dist/release/tern-linux-x64
+(cd dist/release && sha256sum tern-* > checksums.txt && python3 -m http.server 8765) &
+TERN_DOWNLOAD_URL=http://127.0.0.1:8765 sh install.sh
 ```
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.
