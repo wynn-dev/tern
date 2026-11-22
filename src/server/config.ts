@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "n
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
+export type KeyHeader = "x-api-key" | "bearer";
+
 export type Config = {
   host: string;
   port: number;
@@ -18,6 +20,12 @@ export type Config = {
     writeModel: string;
     /** Path to the `claude` executable; found on PATH when empty. */
     claudePath?: string;
+    /** An Anthropic-compatible endpoint Claude Code talks to instead of the Claude login; empty means the login. */
+    baseUrl?: string;
+    /** The endpoint's key, sealed (crypto.ts); never sent to the browser. */
+    apiKey?: string;
+    /** How the key is sent: as x-api-key (ANTHROPIC_API_KEY, the default) or as a Bearer token (ANTHROPIC_AUTH_TOKEN). */
+    keyHeader?: KeyHeader;
   };
   sync: { intervalSec: number; initialDays: number; maxInitial: number };
 };

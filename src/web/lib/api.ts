@@ -21,10 +21,17 @@ export type AccountsResponse = { accounts: Account[]; counts: Counts; labels: { 
 export type Settings = {
   google: { configured: boolean; clientId: string };
   redirectUri: string;
-  ai: { enabled: boolean; classifyModel: string; writeModel: string; claudePath?: string };
+  ai: {
+    enabled: boolean; classifyModel: string; writeModel: string; claudePath?: string;
+    /** Your own Anthropic-compatible endpoint; unset means the Claude Code login. */
+    baseUrl?: string; keyHeader?: KeyHeader; apiKeySet: boolean;
+  };
 };
+export type KeyHeader = "x-api-key" | "bearer";
+/** What Settings › AI saves; `apiKey` goes to the server only, "" removes it. */
+export type AiPatch = Partial<Omit<Settings["ai"], "apiKeySet">> & { apiKey?: string };
 export type AiStatus = {
-  enabled: boolean; claudePath: string | null; busy: boolean; lastError: string | null;
+  enabled: boolean; claudePath: string | null; mode: "login" | "endpoint"; endpoint: string | null; busy: boolean; lastError: string | null;
   lastErrorCode: "signed_out" | "missing" | "rate_limited" | "failed" | null; classified: number;
 };
 export type Action = "archive" | "inbox" | "star" | "unstar" | "read" | "unread" | "trash" | "untrash" | "spam" | "notspam";
@@ -91,7 +98,7 @@ export const api = {
   summarize: (accountId: string, threadId: string) => req<{ summary: string; actions: string[] }>("POST", "/api/ai/summarize", { accountId, threadId }),
   draft: (accountId: string, threadId: string, instruction?: string) => req<{ body: string }>("POST", "/api/ai/draft", { accountId, threadId, instruction }),
   settings: () => req<Settings>("GET", "/api/settings"),
-  saveSettings: (s: { google?: { clientId: string; clientSecret: string }; ai?: Partial<Settings["ai"]> }) => req("PUT", "/api/settings", s),
+  saveSettings: (s: { google?: { clientId: string; clientSecret: string }; ai?: AiPatch }) => req("PUT", "/api/settings", s),
 };
 
 export const threadKey = (t: { account_id: string; thread_id: string }) => `${t.account_id}:${t.thread_id}`;

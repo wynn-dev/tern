@@ -6,6 +6,7 @@ import { platform } from "node:os";
 import { parseArgs } from "node:util";
 import pkg from "../../package.json";
 import { dataDir, loadConfig, publicUrl, saveConfig, type Config } from "../server/config";
+import { seal } from "../server/crypto";
 import { binDir, installBinary, installedBin, logPath, service, writeUnit } from "./service";
 
 const c = {
@@ -34,7 +35,8 @@ ${c.bold("Usage")}
   tern logs [-f]          show (or follow) the service log
   tern password [--off]   require a password for the web UI (or stop requiring one)
   tern config [key] [value]
-                          show or change settings (port, host, publicUrl, ai.enabled, ai.classifyModel, ...)
+                          show or change settings (port, host, publicUrl, ai.enabled, ai.classifyModel,
+                          ai.baseUrl, ai.apiKey, ai.keyHeader, ...)
   tern doctor             check Google, Claude and the service
   tern uninstall [--purge]
                           remove the service (--purge also deletes mail data and settings)
@@ -178,16 +180,24 @@ async function setPassword(off: boolean) {
 function config(args: string[]) {
   const cfg = loadConfig() as Record<string, any>;
   const [key, value] = args;
-  const redacted = () => JSON.stringify({ ...cfg, passwordHash: cfg.passwordHash && "•••", google: cfg.google && { ...cfg.google, clientSecret: "•••" } }, null, 2);
+  const redacted = () =>
+    JSON.stringify(
+      { ...cfg, passwordHash: cfg.passwordHash && "•••", google: cfg.google && { ...cfg.google, clientSecret: "•••" }, ai: { ...cfg.ai, apiKey: cfg.ai.apiKey && "•••" } },
+      null,
+      2,
+    );
   if (!key) return console.log(redacted());
   const path = key.split(".");
   let obj = cfg;
   for (const p of path.slice(0, -1)) obj = obj[p] ??= {};
   const last = path.at(-1)!;
-  if (value === undefined) return console.log(JSON.stringify(obj[last], null, 2));
-  obj[last] = value === "true" ? true : value === "false" ? false : /^\d+$/.test(value) ? Number(value) : value;
+  // the endpoint's key is kept sealed, as Settings › AI keeps it, and never printed
+  const isKey = key === "ai.apiKey";
+  if (value === undefined) return console.log(isKey ? (obj[last] ? "set" : "not set") : JSON.stringify(obj[last], null, 2));
+  if (isKey) obj[last] = value ? seal(value) : undefined;
+  else obj[last] = value === "true" ? true : value === "false" ? false : /^\d+$/.test(value) ? Number(value) : value;
   saveConfig(cfg as Config);
-  ok(`${key} = ${value}${service.status().running ? c.dim("  (run `tern restart` to apply)") : ""}`);
+  ok(`${key} = ${isKey ? "•••" : value}${service.status().running ? c.dim("  (run `tern restart` to apply)") : ""}`);
 }
 
 async function doctor() {
@@ -205,12 +215,15 @@ async function doctor() {
   if (!claude) return warn("claude: not found — install Claude Code and sign in to turn on AI features");
   ok(`claude: ${claude}`);
   if (!cfg.ai.enabled) return warn("ai: turned off (`tern config ai.enabled true`)");
+  const endpoint = cfg.ai.baseUrl;
+  if (endpoint) (cfg.ai.apiKey ? ok : warn)(`ai mode: your endpoint ${endpoint}, key ${cfg.ai.apiKey ? "set" : "missing"}, sent as ${cfg.ai.keyHeader === "bearer" ? "a Bearer token" : "x-api-key"}`);
+  else ok("ai mode: your Claude Code login (Claude subscription)");
   process.stdout.write(c.dim("  asking Claude… "));
   try {
     const { ping } = await import("../server/ai");
     await ping();
     console.log();
-    ok("ai: Claude answers on your subscription");
+    ok(endpoint ? `ai: your endpoint answers (${cfg.ai.classifyModel})` : "ai: Claude answers on your subscription");
   } catch (e) {
     console.log();
     // ping() throws an AiError: a message to act on, plus what Claude Code printed

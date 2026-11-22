@@ -184,7 +184,13 @@ export function Sidebar() {
         </IconButton>
         <div className="flex-1" />
         <Tooltip
-          label={!ai?.enabled ? "AI is off" : !ai.claudePath ? "Install Claude Code to turn on AI" : (ai.lastError ?? `Claude: ${ai.claudePath}`)}
+          label={
+            !ai?.enabled
+              ? "AI is off"
+              : !ai.claudePath
+                ? "Install Claude Code to turn on AI"
+                : (ai.lastError ?? (ai.mode === "endpoint" ? `Claude Code via your endpoint: ${ai.endpoint}` : `Claude Code on your Claude login: ${ai.claudePath}`))
+          }
           side="top"
         >
           <div className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] text-muted-foreground">
