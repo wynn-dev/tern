@@ -17,13 +17,24 @@ import { useAccounts, useLiveUpdates, useSessionGuard } from "./hooks/data";
 import { SHORTCUTS, useKeyboard } from "./hooks/keyboard";
 import { api } from "./lib/api";
 import { useStore } from "./lib/store";
+import { cn } from "./lib/utils";
 
 export function App() {
   const qc = useQueryClient();
   const { data: session, error, isFetching, refetch } = useQuery({ queryKey: ["session"], queryFn: api.session });
   if (!session) return error ? <LoadError title="Couldn't open Tern" error={error} retrying={isFetching} onRetry={() => void refetch()} className="pb-0" /> : null;
-  if (!session.authed) return <SignIn expired={!!session.expired} onDone={() => void qc.invalidateQueries()} />;
-  return <Mail />;
+  const onSignedIn = () => void qc.invalidateQueries();
+  if (!session.authed && !session.expired) return <SignIn expired={false} onDone={onSignedIn} />;
+  // when the session ends mid-use, sign in over the mail rather than in place of it, so an open draft and the view survive
+  const expired = !session.authed;
+  return (
+    <>
+      <div className="h-full" inert={expired}>
+        <Mail />
+      </div>
+      {expired && <SignIn expired onDone={onSignedIn} />}
+    </>
+  );
 }
 
 function Mail() {
@@ -87,7 +98,13 @@ function SignIn({ expired, onDone }: { expired: boolean; onDone: () => void }) {
   const [pw, setPw] = useState("");
   const m = useMutation({ mutationFn: () => api.signIn(pw), onSuccess: onDone });
   return (
-    <div className="flex h-full items-center justify-center bg-sidebar">
+    <div
+      role={expired ? "dialog" : undefined}
+      aria-modal={expired || undefined}
+      aria-label={expired ? "Sign in again" : undefined}
+      tabIndex={-1}
+      className={cn("flex items-center justify-center outline-none", expired ? "fixed inset-0 z-50 bg-sidebar/80 backdrop-blur-sm" : "h-full bg-sidebar")}
+    >
       <motion.form
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
