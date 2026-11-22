@@ -24,8 +24,11 @@ const labelChange: Record<Action, [add: string[], remove: string[]]> = {
  * if Gmail refuses, put the labels back.
  */
 export async function applyAction(accountId: string, threadId: string, action: Action, demo: boolean) {
-  const [add, remove] = labelChange[action];
   const before = threadMessages(accountId, threadId);
+  // "Move to inbox" on a trashed or spam thread takes it out of there, or it stays stuck in Trash
+  if (action === "inbox" && before.some((m) => m.labels.includes("TRASH"))) action = "untrash";
+  else if (action === "inbox" && before.some((m) => m.labels.includes("SPAM"))) action = "notspam";
+  const [add, remove] = labelChange[action];
   // Gmail stars messages, not threads: star the latest one, unstar every one (a thread is starred while any message is)
   const touched = action === "star" ? before.slice(-1) : before;
   for (const m of touched) {
