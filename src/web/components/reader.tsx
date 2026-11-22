@@ -273,7 +273,8 @@ function MessageCard({ m, me, open, onToggle }: { m: Message; me?: string; open:
         <Avatar person={from} size={30} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="truncate text-[13.5px] font-medium">{mine ? "You" : displayName(from)}</span>
+            {/* in a narrow reader the address gives way first, never the name */}
+            <span className="max-w-full shrink-0 truncate text-[13.5px] font-medium">{mine ? "You" : displayName(from)}</span>
             {!mine && open && <span className="truncate text-[12px] text-muted-foreground">{m.from_email}</span>}
           </div>
           <div className="truncate text-[12.5px] text-muted-foreground">{open ? `to ${recipients}` : m.snippet}</div>

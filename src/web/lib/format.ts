@@ -15,6 +15,10 @@ export const longDate = (ms: number) =>
 export const displayName = (a: { name: string; email: string }) => a.name || a.email.split("@")[0];
 /** For recipient lists, where a bare local part ("linda.rivera") hides who it went to. */
 export const addressLabel = (a: { name: string; email: string }) => a.name || a.email;
+/** Is a broken account's error an expired or revoked Google sign-in? Anything else is a failed sync. */
+export const signedOut = (a: { error: string | null }) => /token|invalid_grant|revoked|expired|authenticat|credential|isn't connected/i.test(a.error ?? "");
+/** A broken account, in words. */
+export const accountTrouble = (a: { email: string; error: string | null }) => (signedOut(a) ? `${a.email} was signed out` : `Couldn't sync ${a.email}`);
 export const firstName = (a: { name: string; email: string }) => displayName(a).split(/\s+/)[0];
 
 export function initials(a: { name: string; email: string }) {

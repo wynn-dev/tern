@@ -6,6 +6,8 @@ export type Theme = "light" | "dark";
 const KEY = "tern-theme";
 /** Anything but an explicit light or dark (nothing stored, an old value) follows the OS. */
 export const readPref = (v: string | null): ThemePref => (v === "light" || v === "dark" ? v : "system");
+/** The sidebar's theme button steps through all three: system, then light, then dark. */
+export const nextPref = (p: ThemePref): ThemePref => (p === "system" ? "light" : p === "light" ? "dark" : "system");
 export const resolveTheme = (pref: ThemePref, osDark: boolean): Theme => (pref === "system" ? (osDark ? "dark" : "light") : pref);
 
 type Media = { readonly matches: boolean; addEventListener(type: "change", fn: () => void): void };
@@ -54,6 +56,6 @@ export function useTheme() {
   const theme = useSyncExternalStore(subscribe, () => controller().theme());
   const pref = useSyncExternalStore(subscribe, () => controller().pref());
   const setPref = useCallback((p: ThemePref) => controller().set(p), []);
-  const toggle = useCallback(() => controller().set(controller().theme() === "dark" ? "light" : "dark"), []);
-  return { theme, pref, setPref, toggle };
+  const cycle = useCallback(() => controller().set(nextPref(controller().pref())), []);
+  return { theme, pref, setPref, cycle };
 }

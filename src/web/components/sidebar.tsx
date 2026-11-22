@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArchiveIcon, InboxIcon, Loader2Icon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, ReplyIcon, SendIcon, SettingsIcon, SparklesIcon,
+  ArchiveIcon, InboxIcon, Loader2Icon, MonitorIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, ReplyIcon, SendIcon, SettingsIcon, SparklesIcon,
   StarIcon, SunIcon, TagIcon, Trash2Icon, AlertCircleIcon,
 } from "lucide-react";
 import { useMemo } from "react";
 import { motion } from "motion/react";
 import { useAccounts } from "@/hooks/data";
-import { useTheme } from "@/hooks/theme";
+import { type ThemePref, nextPref, useTheme } from "@/hooks/theme";
 import { api } from "@/lib/api";
+import { scopedCounts } from "@/lib/counts";
+import { accountTrouble } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CATEGORY, Dot } from "./bits";
@@ -23,6 +25,12 @@ const NAV = [
   { view: "spam", label: "Spam", icon: OctagonAlertIcon, kbd: "G !" },
   { view: "trash", label: "Trash", icon: Trash2Icon, kbd: "G #" },
 ];
+
+const THEME: Record<ThemePref, { label: string; icon: typeof SunIcon }> = {
+  system: { label: "System theme", icon: MonitorIcon },
+  light: { label: "Light theme", icon: SunIcon },
+  dark: { label: "Dark theme", icon: MoonIcon },
+};
 
 function Item({
   active, onClick, children, count, layoutId = "nav-active",
@@ -47,13 +55,12 @@ function Item({
 export function Sidebar() {
   const { view, account, setView, openCompose, set } = useStore();
   const { data } = useAccounts();
-  const { theme, toggle } = useTheme();
+  const { pref, cycle } = useTheme();
   const { data: ai } = useQuery({ queryKey: ["ai-status"], queryFn: api.aiStatus, refetchInterval: 15_000 });
   const accounts = data?.accounts ?? [];
   const counts = data?.counts;
-  const scoped = Object.entries(counts?.accounts ?? {}).filter(([id]) => !account || id === account);
-  const totalUnread = scoped.reduce((n, [, c]) => n + c.inboxUnread, 0);
-  const needsReply = scoped.reduce((n, [, c]) => n + c.needsReply, 0);
+  const scoped = scopedCounts(counts, account);
+  const ThemeIcon = THEME[pref].icon;
   // one entry per label name: a label that several accounts have is one view across them
   const labels = useMemo(
     () => [...new Set((data?.labels ?? []).filter((l) => !account || l.account_id === account).map((l) => l.name))],
@@ -84,7 +91,7 @@ export function Sidebar() {
               key={n.view}
               active={view === n.view}
               onClick={() => setView(n.view)}
-              count={n.view === "inbox" ? totalUnread : n.view === "needs-reply" ? needsReply : undefined}
+              count={n.view === "inbox" ? scoped.inboxUnread : n.view === "needs-reply" ? scoped.needsReply : undefined}
             >
               <n.icon />
               {n.label}
@@ -98,7 +105,7 @@ export function Sidebar() {
           </div>
           <div className="space-y-px">
             {Object.entries(CATEGORY).map(([key, c]) => (
-              <Item key={key} active={view === `category:${key}`} onClick={() => setView(`category:${key}`)} count={counts?.categories[key]}>
+              <Item key={key} active={view === `category:${key}`} onClick={() => setView(`category:${key}`)} count={scoped.categories[key]}>
                 <c.icon style={{ color: c.color }} />
                 {c.label}
               </Item>
@@ -154,7 +161,11 @@ export function Sidebar() {
                   {a.status === "syncing" ? (
                     <Loader2Icon className="!size-3 animate-spin" style={{ color: a.color }} />
                   ) : a.status === "error" ? (
-                    <AlertCircleIcon className="!size-3.5 text-destructive" />
+                    <Tooltip label={`${accountTrouble(a)}. Reconnect it from the list or Settings.`} side="right">
+                      <span role="img" aria-label={accountTrouble(a)} className="flex">
+                        <AlertCircleIcon className="!size-3.5 text-destructive" />
+                      </span>
+                    </Tooltip>
                   ) : (
                     <Dot color={a.color} />
                   )}
@@ -172,9 +183,9 @@ export function Sidebar() {
             <SettingsIcon />
           </Button>
         </Tooltip>
-        <Tooltip label={theme === "dark" ? "Light mode" : "Dark mode"}>
-          <Button size="icon-sm" variant="ghost" onClick={toggle}>
-            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+        <Tooltip label={`${THEME[pref].label} · click for ${THEME[nextPref(pref)].label.toLowerCase()}`}>
+          <Button size="icon-sm" variant="ghost" onClick={cycle}>
+            <ThemeIcon />
           </Button>
         </Tooltip>
         <div className="flex-1" />

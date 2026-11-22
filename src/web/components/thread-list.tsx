@@ -1,15 +1,18 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
+import { AlertCircleIcon, Loader2Icon, PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { prefetchThread, useAccounts, useThreads } from "@/hooks/data";
-import { threadKey, type Account, type Thread } from "@/lib/api";
-import { displayName, firstName, shortDate } from "@/lib/format";
+import { api, threadKey, type Account, type Thread } from "@/lib/api";
+import { scopedCounts, viewUnread } from "@/lib/counts";
+import { accountTrouble, displayName, firstName, shortDate, signedOut } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CategoryChip, categoryMeta, CATEGORY } from "./bits";
 import { LoadError } from "./load-error";
+import { Button } from "./ui/button";
 
 const ROW = 76;
 
@@ -119,24 +122,28 @@ export function ThreadList() {
     if (selectedIndex >= 0) v.scrollToIndex(selectedIndex, { align: "auto" });
   }, [selectedIndex, v]);
 
-  const unread = threads.filter((t) => t.unread).length;
+  // from the server's counts, so it agrees with the sidebar however many pages are loaded
+  const unread = query ? undefined : viewUnread(view, scopedCounts(data?.counts, account));
   const acc = account ? accounts.get(account) : undefined;
+  const broken = useMemo(() => [...accounts.values()].filter((a) => a.status === "error" && (!account || a.id === account)), [accounts, account]);
 
   return (
-    <section className="flex w-[420px] shrink-0 flex-col border-r bg-background">
+    // below ~1200 px the list gives up width (down to 320 px) so the reader isn't squeezed
+    <section className="flex w-[clamp(320px,calc(50vw-180px),420px)] shrink-0 flex-col border-r bg-background">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <motion.h1 key={view} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="text-[14px] font-semibold tracking-tight">
           {viewTitle(view)}
         </motion.h1>
         {acc && (
-          <span className="flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11.5px] text-muted-foreground">
-            <span className="size-1.5 rounded-full" style={{ background: acc.color }} />
-            {acc.email}
+          <span className="flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11.5px] text-muted-foreground">
+            <span className="size-1.5 shrink-0 rounded-full" style={{ background: acc.color }} />
+            <span className="truncate">{acc.email}</span>
           </span>
         )}
-        {!!unread && view === "inbox" && <span className="text-[12px] text-muted-foreground">{unread} unread</span>}
+        {!!unread && <span className="shrink-0 text-[12px] text-muted-foreground">{unread} unread</span>}
       </header>
       <SearchBox value={query} onChange={setQuery} />
+      {!!broken.length && !(acc && !threads.length) && <BrokenBanner accounts={broken} />}
       {isRefetchError && !!threads.length && (
         <div role="alert" className="flex h-8 shrink-0 items-center gap-2 border-b bg-destructive/8 px-4 text-[12px] text-destructive">
           <span className="truncate">Couldn't refresh: {error?.message}</span>
@@ -151,8 +158,10 @@ export function ThreadList() {
           <Skeleton />
         ) : error && !threads.length ? (
           <LoadError title="Couldn't load your mail" error={error} retrying={isFetching} onRetry={() => void refetch()} />
+        ) : !threads.length && acc?.status === "error" ? (
+          <BrokenAccount account={acc} />
         ) : !threads.length ? (
-          <Empty view={view} searching={!!query} />
+          <Empty view={view} query={query} />
         ) : (
           <div style={{ height: v.getTotalSize() + (isFetchNextPageError ? 48 : 0) }} className="relative">
             {items.map((it) => {
@@ -240,16 +249,85 @@ function Skeleton() {
   );
 }
 
-function Empty({ view, searching }: { view: string; searching: boolean }) {
-  const title = searching ? "No matches" : view === "inbox" ? "Inbox zero" : "Nothing here";
-  const sub = searching ? "Try fewer words, or search All mail." : view === "inbox" ? "Everything's handled. Enjoy the quiet." : "Mail that lands here shows up instantly.";
+/** What an empty view says, by view: an empty Trash isn't "Inbox zero". */
+export function emptyCopy(view: string, searching: boolean): { title: string; sub: string } {
+  if (searching) return { title: "No matches", sub: view === "all" ? "Try fewer or different words." : "Try fewer words, or search all your mail." };
+  if (view === "inbox") return { title: "Inbox zero", sub: "Everything's handled. Enjoy the quiet." };
+  if (view === "needs-reply") return { title: "Nothing needs a reply", sub: "Threads waiting on an answer from you show up here." };
+  if (view === "starred") return { title: "No starred mail", sub: "Press S on a thread to star it and keep it here." };
+  if (view === "sent") return { title: "Nothing sent yet", sub: "Mail you send shows up here." };
+  if (view === "all") return { title: "No mail yet", sub: "Your mail shows up here as it syncs." };
+  if (view === "spam") return { title: "No spam", sub: "Mail Gmail flags as spam lands here." };
+  if (view === "trash") return { title: "Trash is empty", sub: "Mail you trash shows up here." };
+  if (view.startsWith("category:")) return { title: `Nothing in ${viewTitle(view)}`, sub: `Inbox mail the AI sorts as ${viewTitle(view)} shows up here.` };
+  if (view.startsWith("label:")) return { title: `Nothing labelled ${view.slice(6)}`, sub: "Mail with this label shows up here." };
+  return { title: "Nothing here", sub: "Mail that lands here shows up instantly." };
+}
+
+function Empty({ view, query }: { view: string; query: string }) {
+  const { title, sub } = emptyCopy(view, !!query);
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2 }} className="flex h-full flex-col items-center justify-center gap-1 pb-16 text-center">
+    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2 }} className="flex h-full flex-col items-center justify-center gap-1 px-8 pb-16 text-center">
       <svg viewBox="0 0 32 32" className="mb-3 size-10 text-muted-foreground/30">
         <path d="M6 20c4-1 7-4 10-9 2 4 5 7 10 8-5 0-8 1-10 5-2-3-5-4-10-4z" fill="currentColor" />
       </svg>
       <div className="text-[14px] font-medium">{title}</div>
       <div className="text-[12.5px] text-muted-foreground">{sub}</div>
+      {query && view !== "all" && (
+        // one store update, so the switch is one history entry and the query survives it (setView clears it)
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => useStore.setState({ view: "all", query, selected: null, cursor: 0 })}>
+          <SearchIcon /> Search All mail
+        </Button>
+      )}
+    </motion.div>
+  );
+}
+
+/** Starts Google's sign-in again; picking the signed-out account there reconnects it. */
+function useReconnect() {
+  return useMutation({
+    mutationFn: api.connect,
+    onSuccess: ({ url }) => window.open(url, "_self"),
+    onError: (e) => toast.error(e.message),
+  });
+}
+
+function BrokenBanner({ accounts }: { accounts: Account[] }) {
+  const reconnect = useReconnect();
+  return (
+    <div role="alert" className="flex h-8 shrink-0 items-center gap-2 border-b bg-destructive/8 px-4 text-[12px] text-destructive">
+      <AlertCircleIcon className="size-3.5 shrink-0" />
+      <span className="truncate" title={accounts.map((a) => a.error).join("\n")}>
+        {/* the state first, so a narrow list truncates the address rather than "signed out" */}
+        {accounts.length === 1 ? `${signedOut(accounts[0]) ? "Signed out" : "Couldn't sync"}: ${accounts[0].email}` : `${accounts.length} accounts need reconnecting`}
+      </span>
+      <span className="flex-1" />
+      <button onClick={() => reconnect.mutate()} disabled={reconnect.isPending} className="shrink-0 font-medium underline-offset-2 hover:underline disabled:opacity-50">
+        Reconnect
+      </button>
+    </div>
+  );
+}
+
+/** A broken account with nothing synced: say so, never "Inbox zero". */
+function BrokenAccount({ account }: { account: Account }) {
+  const reconnect = useReconnect();
+  return (
+    <motion.div
+      role="alert"
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.2 }}
+      className="flex h-full flex-col items-center justify-center gap-1 px-8 pb-16 text-center"
+    >
+      <AlertCircleIcon className="mb-3 size-8 text-destructive/70" strokeWidth={1.5} />
+      <div className="max-w-full text-[14px] font-medium break-words">{accountTrouble(account)}</div>
+      <div className="max-w-[320px] text-[12.5px] break-words text-muted-foreground">
+        {account.error ?? "Tern can't reach this account."} Reconnect it to see its mail.
+      </div>
+      <Button variant="outline" size="sm" className="mt-3" disabled={reconnect.isPending} onClick={() => reconnect.mutate()}>
+        {reconnect.isPending && <Loader2Icon className="animate-spin" />} Reconnect
+      </Button>
     </motion.div>
   );
 }
