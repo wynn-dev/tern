@@ -1,0 +1,8 @@
+node_modules
+dist
+src/server/assets.gen.ts
+*.log
+.data
+.env*
+*.pem
+*.key
