@@ -3,18 +3,26 @@ import {
   deleteMessage, getAccount, hasMessage, listAccounts, replaceLabels, setMessageLabels, updateAccount, upsertMessages,
 } from "./db";
 import { events } from "./events";
-import { gmail, GmailError } from "./gmail";
+import { gmail, GmailError, inBackground } from "./gmail";
 import { fromGmail } from "./mime";
+
+export const CATCHING_UP = "Gmail is rate-limiting Tern, catching up";
 
 const running = new Map<string, Promise<void>>();
 let onSynced: (() => void) | undefined;
 
-/** Run `fn` over `items` with at most `n` in flight. */
+/** Run `fn` over `items` with at most `n` in flight; after a failure, start no more and throw once the rest settle. */
 async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
   let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) await fn(items[i++]);
+  let failed = false;
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length && !failed) await fn(items[i++]).catch((e) => {
+      failed = true;
+      throw e;
+    });
   }));
+  const err = workers.find((w) => w.status === "rejected");
+  if (err) throw err.reason;
 }
 
 async function fetchAndStore(accountId: string, ids: string[], progress?: (done: number) => void) {
@@ -25,16 +33,22 @@ async function fetchAndStore(accountId: string, ids: string[], progress?: (done:
     batch = [];
     if (keys?.length) events.emit({ type: "threads", keys });
   };
-  await pool(ids, 8, async (id) => {
-    try {
-      batch.push(fromGmail(accountId, await gmail.get(accountId, id)));
-    } catch (e) {
-      if (!(e instanceof GmailError && e.status === 404)) throw e;
-    }
-    progress?.(++done);
-    if (batch.length >= 40) flush();
-  });
-  flush();
+  try {
+    await pool(ids, 8, async (id) => {
+      try {
+        // fetch first: `batch.push(await …)` would push into the batch another worker flushed meanwhile
+        const m = await gmail.get(accountId, id);
+        batch.push(fromGmail(accountId, m));
+      } catch (e) {
+        if (!(e instanceof GmailError && e.status === 404)) throw e;
+      }
+      progress?.(++done);
+      if (batch.length >= 40) flush();
+    });
+  } finally {
+    // keep what came in before a failure: the next sync skips it
+    flush();
+  }
 }
 
 async function fullSync(accountId: string) {
@@ -109,20 +123,34 @@ export function syncAccount(accountId: string): Promise<void> {
       updateAccount(accountId, { status: "syncing", error: null });
       events.emit({ type: "sync", accountId, status: "syncing", progress: 0 });
     }
+    // Gmail pushing back isn't a failure: say so plainly while the limiter waits it out
+    const limited = () => {
+      if (getAccount(accountId)?.status === "limited") return;
+      updateAccount(accountId, { status: "limited", error: CATCHING_UP });
+      events.emit({ type: "account", accountId });
+    };
     try {
-      if (acc.history_id) {
-        try {
-          await incrementalSync(accountId, acc.history_id);
-        } catch (e) {
-          // history ids expire after about a week; start over
-          if (e instanceof GmailError && e.status === 404) await fullSync(accountId);
-          else throw e;
-        }
-      } else await fullSync(accountId);
+      await inBackground(async () => {
+        if (acc.history_id) {
+          try {
+            await incrementalSync(accountId, acc.history_id);
+          } catch (e) {
+            // history ids expire after about a week; start over
+            if (e instanceof GmailError && e.status === 404) await fullSync(accountId);
+            else throw e;
+          }
+        } else await fullSync(accountId);
+      }, limited);
       updateAccount(accountId, { status: "idle", error: null });
       if (first) events.emit({ type: "sync", accountId, status: "idle", progress: 1 });
       onSynced?.();
     } catch (e) {
+      if (e instanceof GmailError && e.rateLimited) {
+        // what's stored stays; the next tick picks up where this left off
+        console.error(`[sync] ${acc.email}: ${CATCHING_UP}`);
+        limited();
+        return;
+      }
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`[sync] ${acc.email}: ${msg}`);
       updateAccount(accountId, { status: "error", error: msg });

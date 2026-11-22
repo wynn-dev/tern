@@ -49,11 +49,13 @@ const message = (id: string, text: string): Message => ({
 });
 const messages = [message("m1", "First"), message("m2", "Thursday?\n\nOn Mon, Priya wrote:\n> First")];
 
-function client() {
+const accounts = [account("a", "me@x.io"), account("b", "broken@x.io", { status: "error", error: "Sign-in expired. Reconnect this account." })];
+
+function client(accs = accounts) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   qc.setQueryData(["session"], { authed: true, passwordRequired: true, demo: false });
   qc.setQueryData(["accounts"], {
-    accounts: [account("a", "me@x.io"), account("b", "broken@x.io", { status: "error", error: "Sign-in expired. Reconnect this account." })],
+    accounts: accs,
     counts: { accounts: { a: { inboxUnread: 1, needsReply: 1, categories: { work: 1 } } }, categories: { work: 1 } },
     labels: [{ account_id: "a", id: "L1", name: "Clients" }],
   });
@@ -64,13 +66,13 @@ function client() {
   return qc;
 }
 
-async function render() {
+async function render(accs = accounts) {
   const el = document.createElement("div");
   document.body.append(el);
   const root = createRoot(el);
   await act(async () =>
     root.render(
-      <QueryClientProvider client={client()}>
+      <QueryClientProvider client={client(accs)}>
         <TooltipProvider>
           <div className="flex h-full">
             <Sidebar />
@@ -148,4 +150,16 @@ test("the broken account's empty state says 'reconnect' once", async () => {
   expect(brokenHint({ error: "Sign-in expired. Reconnect this account." })).toBe("Sign-in expired. Reconnect this account.");
   expect(brokenHint({ error: "invalid_grant" })).toBe("invalid_grant Reconnect it to see its mail.");
   expect(brokenHint({ error: null })).toBe("Tern can't reach this account. Reconnect it to see its mail.");
+});
+
+test("an account Gmail is rate-limiting says so plainly in the sidebar, the list and Settings", async () => {
+  const catchingUp = "Gmail is rate-limiting Tern, catching up";
+  useStore.setState({ view: "inbox", account: null, query: "", selected: null, compose: null, settingsOpen: true, paletteOpen: false });
+  await render([account("a", "me@x.io"), account("c", "busy@x.io", { status: "limited", error: catchingUp })]);
+  expect(document.querySelector(`nav [role=img][aria-label="busy@x.io: ${catchingUp}"]`)).not.toBeNull();
+  expect(document.querySelector('section[aria-label="Conversations"] [role=status]')?.textContent).toBe(`${catchingUp}: busy@x.io`);
+  expect(document.querySelector("[role=dialog]")?.textContent).toContain(`busy@x.io${catchingUp}`);
+  // not a broken account: nothing asks to reconnect it
+  expect(document.body.textContent).not.toContain("Couldn't sync");
+  expect(document.querySelector('[role=alert]')).toBeNull();
 });

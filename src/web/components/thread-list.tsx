@@ -1,12 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertCircleIcon, Loader2Icon, PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
+import { AlertCircleIcon, HourglassIcon, Loader2Icon, PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { prefetchThread, useAccounts, useThreads } from "@/hooks/data";
 import { api, threadKey, type Account, type Thread } from "@/lib/api";
 import { scopedCounts, viewUnread } from "@/lib/counts";
-import { accountTrouble, displayName, firstName, shortDate, signedOut } from "@/lib/format";
+import { accountTrouble, CATCHING_UP, displayName, firstName, shortDate, signedOut } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
@@ -128,6 +128,7 @@ export function ThreadList() {
   const unread = query ? undefined : viewUnread(view, scopedCounts(data?.counts, account));
   const acc = account ? accounts.get(account) : undefined;
   const broken = useMemo(() => [...accounts.values()].filter((a) => a.status === "error" && (!account || a.id === account)), [accounts, account]);
+  const limited = useMemo(() => [...accounts.values()].filter((a) => a.status === "limited" && (!account || a.id === account)), [accounts, account]);
 
   return (
     // below ~1200 px the list gives up width (down to 320 px) so the reader isn't squeezed
@@ -146,6 +147,15 @@ export function ThreadList() {
       </header>
       <SearchBox value={query} onChange={setQuery} />
       {!!broken.length && !(acc && !threads.length) && <BrokenBanner accounts={broken} />}
+      {!!limited.length && (
+        <div role="status" className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/60 px-4 text-[12px] text-muted-foreground">
+          <HourglassIcon className="size-3.5 shrink-0" />
+          <span className="truncate" title={limited.map((a) => a.email).join("\n")}>
+            {CATCHING_UP}
+            {multi && !acc && limited.length === 1 && `: ${limited[0].email}`}
+          </span>
+        </div>
+      )}
       {isRefetchError && !!threads.length && (
         <div role="alert" className="flex h-8 shrink-0 items-center gap-2 border-b bg-destructive/8 px-4 text-[12px] text-destructive">
           <span className="truncate">Couldn't refresh: {error?.message}</span>
