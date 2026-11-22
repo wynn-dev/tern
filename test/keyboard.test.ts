@@ -165,3 +165,98 @@ test("z undoes the last archive, once", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("⇧E in Trash or Spam moves on to the next conversation, as archive does", () => {
+  for (const [view, p] of [["trash", { in_trash: 1 }], ["spam", { in_spam: 1 }]] as const) {
+    threads = [thread("first", { ...p, in_inbox: 0 }), thread("linear", { ...p, in_inbox: 0 }), thread("last", { ...p, in_inbox: 0 })];
+    useStore.setState({ view, selected: "a:linear" });
+    press("E");
+    expect(useStore.getState().selected).toBe("a:last");
+  }
+  // in the Inbox it was already there: it stays selected
+  useStore.setState({ view: "inbox", selected: "a:first" });
+  threads = [thread("first", { in_inbox: 0 }), thread("last")];
+  press("E");
+  expect(useStore.getState().selected).toBe("a:first");
+});
+
+test("f, r and a on a conversation with no messages do nothing", async () => {
+  const t = threads[0];
+  qc.setQueryData(["thread", "a:first"], { thread: t, messages: [] });
+  useStore.setState({ selected: "a:first" });
+  const errors: unknown[] = [];
+  const onError = (e: unknown) => void errors.push(e);
+  process.on("unhandledRejection", onError);
+  try {
+    for (const key of ["f", "r", "a"]) press(key);
+    await Bun.sleep(0);
+  } finally {
+    process.off("unhandledRejection", onError);
+  }
+  expect(errors).toEqual([]);
+  expect(useStore.getState().compose).toBe(null);
+});
+
+/** Run `body` with fetch answering `{}` and recording each URL. */
+async function withFetch(body: (calls: string[]) => Promise<void>) {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.requestAnimationFrame ??= (fn) => setTimeout(fn, 0) as unknown as number; // sonner dismisses toasts on a frame
+  globalThis.fetch = (async (url: string) => (calls.push(url), new Response("{}"))) as typeof fetch;
+  try {
+    await body(calls);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+test("z undoes only the most recent action: not an archive from before it", async () => {
+  await withFetch(async (calls) => {
+    const act = makeActions(new QueryClient());
+    await act([threads[1]], "archive");
+    await act([threads[0]], "star");
+    press("z");
+    await Bun.sleep(0);
+    expect(calls).toEqual(["/api/threads/a/linear/archive", "/api/threads/a/first/star"]);
+  });
+});
+
+test("z undoes the later of two archives, even when the earlier one answers last", async () => {
+  await withFetch(async (calls) => {
+    const act = makeActions(new QueryClient());
+    let release!: () => void;
+    const slow = new Promise<void>((r) => (release = r));
+    const fetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => (url.includes("/first/") && (await slow), fetch(url))) as typeof fetch;
+    const first = act([threads[0]], "archive");
+    await act([threads[1]], "archive");
+    release();
+    await first;
+    press("z");
+    await Bun.sleep(0);
+    expect(calls.at(-1)).toBe("/api/threads/a/linear/inbox");
+    expect(calls.filter((c) => c.endsWith("/inbox"))).toHaveLength(1);
+  });
+});
+
+test("Move to inbox in Trash or Spam takes the row out of the list at once", async () => {
+  await withFetch(async (calls) => {
+    const qc = new QueryClient();
+    const act = makeActions(qc);
+    for (const [view, p, restore] of [["trash", { in_trash: 1 }, "untrash"], ["spam", { in_spam: 1 }, "notspam"]] as const) {
+      const ts = [thread("x", { ...p, in_inbox: 0 }), thread("y", { ...p, in_inbox: 0 })];
+      const key = ["threads", view, null, ""];
+      qc.setQueryData(key, { pages: [{ threads: ts, next: null }], pageParams: [undefined] });
+      qc.setQueryData(["thread", "a:x"], { thread: ts[0], messages: [] });
+      useStore.setState({ view });
+      calls.length = 0;
+      const done = act([ts[0]], "inbox"); // the reader's button
+      const left = qc.getQueryData<{ pages: { threads: Thread[] }[] }>(key)!.pages[0].threads;
+      expect(left.map((t) => t.thread_id)).toEqual(["y"]);
+      const open = qc.getQueryData<{ thread: Thread }>(["thread", "a:x"])!.thread;
+      expect([open.in_trash, open.in_spam, open.in_inbox]).toEqual([0, 0, 1]);
+      await done;
+      expect(calls).toEqual([`/api/threads/a/x/${restore}`]);
+    }
+  });
+});
