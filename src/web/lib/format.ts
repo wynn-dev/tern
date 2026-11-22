@@ -13,6 +13,8 @@ export const longDate = (ms: number) =>
   new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export const displayName = (a: { name: string; email: string }) => a.name || a.email.split("@")[0];
+/** For recipient lists, where a bare local part ("linda.rivera") hides who it went to. */
+export const addressLabel = (a: { name: string; email: string }) => a.name || a.email;
 export const firstName = (a: { name: string; email: string }) => displayName(a).split(/\s+/)[0];
 
 export function initials(a: { name: string; email: string }) {

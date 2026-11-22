@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDownIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, MoreHorizontalIcon, SendIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, MoreHorizontalIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -124,6 +124,13 @@ function ComposerPanel({ initial }: { initial: ComposeDraft }) {
           <input value={d.subject} onChange={(e) => up({ subject: e.target.value })} className="flex-1 bg-transparent font-medium outline-none" />
         </Field>
       </div>
+
+      {d.note && (
+        <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-2 text-[12px] text-muted-foreground">
+          <PaperclipIcon className="size-3.5 shrink-0" />
+          <span className="truncate" title={d.note}>{d.note}</span>
+        </div>
+      )}
 
       <div className="scroll-thin flex-1 overflow-y-auto">
         <textarea

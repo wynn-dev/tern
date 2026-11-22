@@ -12,6 +12,8 @@ export type ComposeDraft = {
   mode: "new" | "reply" | "forward";
   /** The message being replied to, quoted under the reply when sent. */
   quoted?: string;
+  /** Shown above the body and never sent, e.g. that a forward leaves the attachments out. */
+  note?: string;
 };
 
 type State = {
