@@ -44,6 +44,8 @@ After that, add each Gmail account from **Settings → Add Gmail account**.
 
 Install [Claude Code](https://claude.com/claude-code) on the same machine, then run `claude` once and sign in with your Claude account. Tern finds it on `PATH` and uses that login. Run `tern doctor` to check. Models are set in Settings: Haiku sorts mail, Sonnet writes.
 
+Next to each model, Settings › AI has a reasoning effort: Default, Low, Medium, High, Extra high or Max. Default sends none, so Claude Code picks the model's own default. Higher effort thinks longer, so answers are slower and use more of your Claude limits (or your endpoint's tokens). Sorting runs in the background on every new thread, so keep it on Default or Low. From the shell: `tern config ai.writeEffort high`, `tern config ai.classifyEffort low`; `""` sets either back to Default.
+
 #### Your own AI endpoint
 
 To use your own Anthropic-compatible endpoint and key instead of your Claude login, open *Settings → AI → Your own endpoint* and fill in:

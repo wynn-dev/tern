@@ -7,7 +7,7 @@ const dir = mkdtempSync(join(tmpdir(), "tern-ai-"));
 process.env.TERN_HOME = dir;
 const db = await import("../src/server/db");
 const { saveConfig, loadConfig } = await import("../src/server/config");
-const { AiError, aiStatus, classifyPending, claudeEnv, explainAiError } = await import("../src/server/ai");
+const { AiError, aiStatus, classifyPending, claudeEnv, claudeOptions, explainAiError } = await import("../src/server/ai");
 const { seal } = await import("../src/server/crypto");
 const { createApp } = await import("../src/server/app");
 
@@ -220,4 +220,82 @@ test("Settings seal the key at rest and only ever say whether one is set", async
   expect(await get()).toMatchObject({ apiKeySet: false });
   expect(loadConfig().ai.baseUrl).toBeUndefined();
   expect(loadConfig().ai.apiKey).toBeUndefined();
+});
+
+// ---------- reasoning effort ----------
+
+// a `claude` that writes down the arguments the Agent SDK started it with, then fails
+const argsDump = join(dir, "args.txt");
+const argsClaude = join(dir, "claude-args");
+writeFileSync(argsClaude, `#!/bin/sh\nfor a in "$@"; do echo "$a"; done > "${argsDump}"\nexit 1\n`);
+chmodSync(argsClaude, 0o755);
+const setEffort = (ai: Partial<ReturnType<typeof loadConfig>["ai"]>) =>
+  saveConfig({ ...loadConfig(), ai: { ...loadConfig().ai, baseUrl: undefined, apiKey: undefined, classifyEffort: undefined, writeEffort: undefined, enabled: true, claudePath: argsClaude, ...ai } });
+/** The value Claude Code got for `--effort`, or undefined when the SDK passed none. */
+const effortArg = () => {
+  const args = readFileSync(argsDump, "utf8").split("\n");
+  // the SDK passes it as one argument, --effort=<level>
+  const i = args.findIndex((a) => a === "--effort" || a.startsWith("--effort="));
+  return i < 0 ? undefined : args[i] === "--effort" ? args[i + 1] : args[i].slice("--effort=".length);
+};
+
+test("query() gets the effort when one is set, and no effort option at Default", () => {
+  const ask = { model: "claude-sonnet-5-5", system: "s", prompt: "p" };
+  expect(claudeOptions({ ...ask, effort: "high" }, {}, null)).toMatchObject({ model: "claude-sonnet-5-5", effort: "high" });
+  expect("effort" in claudeOptions(ask, {}, null)).toBe(false);
+  expect("effort" in claudeOptions({ ...ask, effort: undefined }, {}, null)).toBe(false);
+});
+
+test("summaries and drafts run at the write effort, sorting at the sort effort", async () => {
+  setEffort({ writeEffort: "high", classifyEffort: "low" });
+  rmSync(argsDump, { force: true });
+  await post("/api/ai/summarize", thread);
+  expect(effortArg()).toBe("high");
+
+  rmSync(argsDump, { force: true });
+  await post("/api/ai/draft", { ...thread, instruction: "yes" });
+  expect(effortArg()).toBe("high");
+
+  rmSync(argsDump, { force: true });
+  freshThread("t4");
+  await classifyPending();
+  expect(effortArg()).toBe("low");
+
+  setEffort({ writeEffort: "max" });
+  rmSync(argsDump, { force: true });
+  await post("/api/ai/summarize", thread);
+  expect(effortArg()).toBe("max");
+});
+
+test("at Default, Claude Code gets no --effort, as before the setting", async () => {
+  setEffort({});
+  rmSync(argsDump, { force: true });
+  await post("/api/ai/summarize", thread);
+  expect(readFileSync(argsDump, "utf8")).toContain("--model");
+  expect(readFileSync(argsDump, "utf8")).not.toContain("effort");
+  expect(effortArg()).toBeUndefined();
+});
+
+test("the effort reaches Claude Code on your own endpoint too", async () => {
+  setEffort({ baseUrl: "http://127.0.0.1:9999", apiKey: seal("sk-mine"), writeEffort: "medium" });
+  rmSync(argsDump, { force: true });
+  await post("/api/ai/summarize", thread);
+  expect(effortArg()).toBe("medium");
+});
+
+test("Settings save an effort per model, refuse unknown ones, and \"\" puts it back to Default", async () => {
+  setEffort({});
+  const put = (ai: unknown) => app.request("/api/settings", { method: "PUT", headers: { "x-tern": "1", "content-type": "application/json" }, body: JSON.stringify({ ai }) });
+  expect((await put({ classifyEffort: "low", writeEffort: "xhigh" })).status).toBe(200);
+  expect(loadConfig().ai).toMatchObject({ classifyEffort: "low", writeEffort: "xhigh" });
+  expect((await put({ writeEffort: "turbo" })).status).toBe(400);
+  expect((await put({ classifyEffort: 3 })).status).toBe(400);
+  expect(loadConfig().ai.writeEffort).toBe("xhigh");
+  // saving something else leaves the efforts alone
+  await put({ writeModel: "claude-opus-5-5" });
+  expect(loadConfig().ai).toMatchObject({ classifyEffort: "low", writeEffort: "xhigh" });
+  await put({ classifyEffort: "", writeEffort: "" });
+  expect(loadConfig().ai.classifyEffort).toBeUndefined();
+  expect(loadConfig().ai.writeEffort).toBeUndefined();
+  expect(readFileSync(join(dir, "config.json"), "utf8")).not.toContain("Effort");
 });

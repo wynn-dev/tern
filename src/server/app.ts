@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { ACTIONS, applyAction, send, SendError, type Action, type SendInput } from "./actions";
 import { AiError, aiStatus, classifyPending, draftReply, summarizeThread } from "./ai";
-import { loadConfig, saveConfig, type Config } from "./config";
+import { EFFORTS, type Effort, loadConfig, saveConfig, type Config } from "./config";
 import { randomId, seal, sign, verify } from "./crypto";
 import * as db from "./db";
 import { events } from "./events";
@@ -28,6 +28,13 @@ function endpointUrl(v: unknown): string | undefined {
   const u = URL.parse(v.trim());
   if (!u || (u.protocol !== "http:" && u.protocol !== "https:")) throw fail(400, "The endpoint URL must start with http:// or https://");
   return u.href.replace(/\/$/, "");
+}
+
+/** A reasoning effort from Settings, checked; "" is Default, which sends none. */
+function effortLevel(v: unknown): Effort | undefined {
+  if (v === "" || v === null) return undefined;
+  if (!EFFORTS.includes(v as Effort)) throw fail(400, `Reasoning effort must be one of ${EFFORTS.join(", ")}, or "" for the default`);
+  return v as Effort;
 }
 
 /** A mistake in the request: its status and a message the UI can show as is. Anything else that throws is a fault, a 500. */
@@ -235,8 +242,10 @@ export function createApp(opts: AppOptions) {
     const cfg = loadConfig();
     if (patch.google?.clientId) cfg.google = { clientId: patch.google.clientId.trim(), clientSecret: patch.google.clientSecret?.trim() || cfg.google?.clientSecret || "" };
     if (patch.ai) {
-      const { baseUrl, apiKey, keyHeader, apiKeySet: _, ...rest } = patch.ai;
+      const { baseUrl, apiKey, keyHeader, classifyEffort, writeEffort, apiKeySet: _, ...rest } = patch.ai;
       cfg.ai = { ...cfg.ai, ...rest };
+      if (classifyEffort !== undefined) cfg.ai.classifyEffort = effortLevel(classifyEffort);
+      if (writeEffort !== undefined) cfg.ai.writeEffort = effortLevel(writeEffort);
       if (baseUrl !== undefined) cfg.ai.baseUrl = endpointUrl(baseUrl);
       // the key arrives in the clear and is sealed before it touches the disk; "" removes it
       if (apiKey !== undefined) cfg.ai.apiKey = typeof apiKey === "string" && apiKey.trim() ? seal(apiKey.trim()) : undefined;

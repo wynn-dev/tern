@@ -3,6 +3,9 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
 export type KeyHeader = "x-api-key" | "bearer";
+/** Reasoning effort, as the Agent SDK's `effort` option takes it. */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 
 export type Config = {
   host: string;
@@ -18,6 +21,9 @@ export type Config = {
     classifyModel: string;
     /** Model for summaries and drafts. */
     writeModel: string;
+    /** Reasoning effort for sorting and for summaries and drafts; unset leaves it to Claude Code and the model. */
+    classifyEffort?: Effort;
+    writeEffort?: Effort;
     /** Path to the `claude` executable; found on PATH when empty. */
     claudePath?: string;
     /** An Anthropic-compatible endpoint Claude Code talks to instead of the Claude login; empty means the login. */
