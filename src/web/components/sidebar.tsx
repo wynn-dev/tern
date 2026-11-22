@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArchiveIcon, InboxIcon, Loader2Icon, MoonIcon, PenSquareIcon, PlusIcon, ReplyIcon, SendIcon, SettingsIcon, SparklesIcon, StarIcon, SunIcon,
-  Trash2Icon, AlertCircleIcon,
+  ArchiveIcon, InboxIcon, Loader2Icon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, ReplyIcon, SendIcon, SettingsIcon, SparklesIcon,
+  StarIcon, SunIcon, TagIcon, Trash2Icon, AlertCircleIcon,
 } from "lucide-react";
+import { useMemo } from "react";
 import { motion } from "motion/react";
 import { useAccounts } from "@/hooks/data";
 import { useTheme } from "@/hooks/theme";
@@ -19,6 +20,7 @@ const NAV = [
   { view: "starred", label: "Starred", icon: StarIcon, kbd: "G S" },
   { view: "sent", label: "Sent", icon: SendIcon, kbd: "G T" },
   { view: "all", label: "All mail", icon: ArchiveIcon, kbd: "G A" },
+  { view: "spam", label: "Spam", icon: OctagonAlertIcon, kbd: "G !" },
   { view: "trash", label: "Trash", icon: Trash2Icon, kbd: "G #" },
 ];
 
@@ -52,6 +54,11 @@ export function Sidebar() {
   const scoped = Object.entries(counts?.accounts ?? {}).filter(([id]) => !account || id === account);
   const totalUnread = scoped.reduce((n, [, c]) => n + c.inboxUnread, 0);
   const needsReply = scoped.reduce((n, [, c]) => n + c.needsReply, 0);
+  // one entry per label name: a label that several accounts have is one view across them
+  const labels = useMemo(
+    () => [...new Set((data?.labels ?? []).filter((l) => !account || l.account_id === account).map((l) => l.name))],
+    [data?.labels, account],
+  );
 
   return (
     <aside className="flex w-[232px] shrink-0 flex-col border-r bg-sidebar">
@@ -98,6 +105,22 @@ export function Sidebar() {
             ))}
           </div>
         </div>
+
+        {!!labels.length && (
+          <div>
+            <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground/80">
+              <TagIcon className="size-3" /> Labels
+            </div>
+            <div className="space-y-px">
+              {labels.map((name) => (
+                <Item key={name} active={view === `label:${name}`} onClick={() => setView(`label:${name}`)}>
+                  <TagIcon />
+                  <span className="truncate">{name}</span>
+                </Item>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <div className="mb-1 flex items-center justify-between px-2 text-[11px] font-medium text-muted-foreground/80">

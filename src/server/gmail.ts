@@ -116,9 +116,12 @@ async function api<T>(accountId: string, path: string, init?: RequestInit & { qu
 export const gmail = {
   profile: (a: string) => api<{ emailAddress: string; historyId: string; messagesTotal: number }>(a, "profile"),
   labels: (a: string) => api<{ labels: { id: string; name: string; type: string }[] }>(a, "labels"),
-  list: (a: string, q: { q?: string; pageToken?: string; maxResults?: number; labelIds?: string[] }) =>
+  list: (a: string, q: { q?: string; pageToken?: string; maxResults?: number; labelIds?: string[]; includeSpamTrash?: boolean }) =>
     api<{ messages?: { id: string; threadId: string }[]; nextPageToken?: string }>(a, "messages", {
-      query: { q: q.q, pageToken: q.pageToken, maxResults: String(q.maxResults ?? 500), labelIds: q.labelIds },
+      query: {
+        q: q.q, pageToken: q.pageToken, maxResults: String(q.maxResults ?? 500), labelIds: q.labelIds,
+        includeSpamTrash: q.includeSpamTrash ? "true" : undefined,
+      },
     }),
   get: (a: string, id: string) => api<GmailMessage>(a, `messages/${id}`, { query: { format: "full" } }),
   history: (a: string, startHistoryId: string, pageToken?: string) =>

@@ -31,12 +31,20 @@ function participantsLabel(t: Thread, me: string | undefined) {
   return list.slice(0, 3).map(firstName).join(", ");
 }
 
+/** `account:labelId` → name, for the account's user labels. */
+export type LabelNames = Map<string, string>;
+
 const Row = memo(function Row({
-  t, account, selected, showCategory, onSelect, onHover,
+  t, account, selected, showCategory, labelNames, hideLabel, onSelect, onHover,
 }: {
-  t: Thread; account?: Account; selected: boolean; showCategory: boolean; onSelect: () => void; onHover: () => void;
+  t: Thread; account?: Account; selected: boolean; showCategory: boolean; labelNames: LabelNames; hideLabel?: string;
+  onSelect: () => void; onHover: () => void;
 }) {
   const unread = !!t.unread;
+  const labels = t.labels.flatMap((id) => {
+    const name = labelNames.get(`${t.account_id}:${id}`);
+    return name && name !== hideLabel ? [name] : [];
+  });
   return (
     <button
       onClick={onSelect}
@@ -60,7 +68,15 @@ const Row = memo(function Row({
         {showCategory && t.category && <CategoryChip category={t.category} />}
         <span className={cn("shrink-0 text-[11.5px] tabular-nums", unread ? "text-foreground" : "text-muted-foreground")}>{shortDate(t.last_date)}</span>
       </div>
-      <div className={cn("truncate text-[13px]", unread ? "text-foreground" : "text-foreground/75")}>{t.subject || "(no subject)"}</div>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className={cn("flex-1 truncate text-[13px]", unread ? "text-foreground" : "text-foreground/75")}>{t.subject || "(no subject)"}</span>
+        {labels.slice(0, 2).map((name) => (
+          <span key={name} className="max-w-[110px] shrink-0 truncate rounded border px-1 text-[10.5px] leading-[16px] text-muted-foreground">
+            {name}
+          </span>
+        ))}
+        {labels.length > 2 && <span className="shrink-0 text-[10.5px] text-muted-foreground">+{labels.length - 2}</span>}
+      </div>
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted-foreground">
         {t.summary ? (
           <>
@@ -81,6 +97,7 @@ export function ThreadList() {
   const { data } = useAccounts();
   const qc = useQueryClient();
   const accounts = useMemo(() => new Map((data?.accounts ?? []).map((a) => [a.id, a])), [data]);
+  const labelNames: LabelNames = useMemo(() => new Map((data?.labels ?? []).map((l) => [`${l.account_id}:${l.id}`, l.name])), [data]);
   const parent = useRef<HTMLDivElement>(null);
   const multi = accounts.size > 1;
 
@@ -137,6 +154,8 @@ export function ThreadList() {
                     account={multi ? accounts.get(t.account_id) : undefined}
                     selected={key === selected}
                     showCategory={!view.startsWith("category:")}
+                    labelNames={labelNames}
+                    hideLabel={view.startsWith("label:") ? view.slice(6) : undefined}
                     onSelect={() => select(key)}
                     onHover={() => prefetchThread(qc, t)}
                   />

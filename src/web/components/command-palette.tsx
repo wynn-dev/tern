@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import {
-  ArchiveIcon, InboxIcon, KeyboardIcon, MoonIcon, PenSquareIcon, PlusIcon, RefreshCwIcon, ReplyIcon, SearchIcon, SendIcon, SettingsIcon,
-  StarIcon, Trash2Icon,
+  ArchiveIcon, InboxIcon, KeyboardIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, RefreshCwIcon, ReplyIcon, SearchIcon, SendIcon, SettingsIcon,
+  StarIcon, TagIcon, Trash2Icon,
 } from "lucide-react";
 import { Dialog as D } from "radix-ui";
 import { useState } from "react";
@@ -17,6 +17,7 @@ const VIEWS = [
   { view: "starred", label: "Starred", icon: StarIcon },
   { view: "sent", label: "Sent", icon: SendIcon },
   { view: "all", label: "All mail", icon: ArchiveIcon },
+  { view: "spam", label: "Spam", icon: OctagonAlertIcon },
   { view: "trash", label: "Trash", icon: Trash2Icon },
 ];
 
@@ -88,6 +89,11 @@ export function CommandPalette() {
                 {Object.entries(CATEGORY).map(([k, c]) => (
                   <Command.Item key={k} value={`go smart ${c.label}`} onSelect={run(() => setView(`category:${k}`))}>
                     <c.icon style={{ color: c.color }} /> {c.label}
+                  </Command.Item>
+                ))}
+                {[...new Set(data?.labels.map((l) => l.name))].map((name) => (
+                  <Command.Item key={name} value={`go label ${name}`} onSelect={run(() => setView(`label:${name}`))}>
+                    <TagIcon /> {name}
                   </Command.Item>
                 ))}
               </Command.Group>

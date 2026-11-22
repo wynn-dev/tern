@@ -48,7 +48,10 @@ async function fullSync(accountId: string) {
     ids.push(...(page.messages ?? []).map((m) => m.id));
     pageToken = page.nextPageToken;
   } while (pageToken && ids.length < cfg.sync.maxInitial);
-  const missing = ids.slice(0, cfg.sync.maxInitial).filter((id) => !hasMessage(accountId, id));
+  // Gmail leaves spam out of listings; pull in the recent part of it, apart so it can't crowd out real mail
+  const spam = await gmail.list(accountId, { labelIds: ["SPAM"], includeSpamTrash: true, maxResults: 200 });
+  ids.splice(cfg.sync.maxInitial, Infinity, ...(spam.messages ?? []).map((m) => m.id));
+  const missing = ids.filter((id) => !hasMessage(accountId, id));
   await fetchAndStore(accountId, missing, (done) => {
     if (done % 20 === 0 || done === missing.length)
       events.emit({ type: "sync", accountId, status: "syncing", progress: missing.length ? done / missing.length : 1 });

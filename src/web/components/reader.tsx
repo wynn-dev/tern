@@ -129,8 +129,8 @@ function ThreadView({ thread, messages }: { thread: Thread; messages: Message[] 
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onSelect={() => act([thread], "spam")}>
-              <OctagonAlertIcon /> Report spam
+            <DropdownMenuItem onSelect={() => act([thread], thread.in_spam ? "notspam" : "spam")}>
+              <OctagonAlertIcon /> {thread.in_spam ? "Not spam" : "Report spam"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setExpanded(new Set(messages.map((m) => m.id)))}>Expand all</DropdownMenuItem>

@@ -35,7 +35,11 @@ function Mail() {
     const p = new URLSearchParams(location.search);
     if (p.get("connected")) toast.success(`Connected ${p.get("connected")}`, { description: "Pulling in your recent mail…" });
     if (p.get("error")) toast.error(p.get("error")!);
-    if (p.size) history.replaceState(null, "", "/");
+    if (p.has("connected") || p.has("error")) {
+      p.delete("connected");
+      p.delete("error");
+      history.replaceState(history.state, "", location.pathname + (p.size ? `?${p}` : ""));
+    }
   }, []);
 
   useEffect(() => {
