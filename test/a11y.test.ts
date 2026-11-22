@@ -6,5 +6,5 @@ test("controls have names and the page has its landmarks (test/a11y.dom.tsx)", (
   const out = run.stderr.toString() + run.stdout.toString();
   if (run.exitCode !== 0) console.error(out);
   expect(run.exitCode).toBe(0);
-  expect(out).toMatch(/\b3 pass\b/);
+  expect(out).toMatch(/\b4 pass\b/);
 }, 60_000);

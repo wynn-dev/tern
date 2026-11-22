@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAccounts } from "@/hooks/data";
 import { type ThemePref, useTheme } from "@/hooks/theme";
 import { type Account, type AiPatch, api, type Effort, type KeyHeader, type Settings } from "@/lib/api";
+import { CATCHING_UP } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
@@ -233,7 +234,7 @@ function AccountRow({ account: a, onReconnect }: { account: Account; onReconnect
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium">{a.email}</div>
         <div className={cn("text-[12px]", a.status === "error" ? "text-destructive" : "text-muted-foreground")}>
-          {a.status === "error" ? a.error : syncing ? "Syncing…" : "Up to date"}
+          {a.status === "error" ? a.error : a.status === "limited" ? CATCHING_UP : syncing ? "Syncing…" : "Up to date"}
         </div>
       </div>
       {a.status === "error" && (

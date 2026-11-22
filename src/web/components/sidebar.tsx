@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   ArchiveIcon, InboxIcon, Loader2Icon, MonitorIcon, MoonIcon, OctagonAlertIcon, PenSquareIcon, PlusIcon, ReplyIcon, SendIcon, SettingsIcon, SparklesIcon,
-  StarIcon, SunIcon, TagIcon, Trash2Icon, AlertCircleIcon,
+  StarIcon, SunIcon, TagIcon, Trash2Icon, AlertCircleIcon, HourglassIcon,
 } from "lucide-react";
 import { useMemo } from "react";
 import { motion } from "motion/react";
@@ -9,7 +9,7 @@ import { useAccounts } from "@/hooks/data";
 import { type ThemePref, nextPref, useTheme } from "@/hooks/theme";
 import { api } from "@/lib/api";
 import { scopedCounts } from "@/lib/counts";
-import { accountTrouble } from "@/lib/format";
+import { accountTrouble, CATCHING_UP } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CATEGORY, Dot } from "./bits";
@@ -158,6 +158,12 @@ export function Sidebar() {
                 <span className="flex size-[15px] items-center justify-center">
                   {a.status === "syncing" ? (
                     <Loader2Icon className="!size-3 animate-spin" style={{ color: a.color }} />
+                  ) : a.status === "limited" ? (
+                    <Tooltip label={CATCHING_UP} side="right">
+                      <span role="img" aria-label={`${a.email}: ${CATCHING_UP}`} className="flex">
+                        <HourglassIcon className="!size-3" style={{ color: a.color }} />
+                      </span>
+                    </Tooltip>
                   ) : a.status === "error" ? (
                     <Tooltip label={`${accountTrouble(a)}. Reconnect it from the list or Settings.`} side="right">
                       <span role="img" aria-label={accountTrouble(a)} className="flex">
