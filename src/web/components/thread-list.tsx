@@ -2,19 +2,60 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircleIcon, HourglassIcon, Loader2Icon, PaperclipIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { prefetchThread, useAccounts, useThreads } from "@/hooks/data";
+import { type CSSProperties, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { prefetchThread, useAccounts, useStats, useThreads } from "@/hooks/data";
 import { api, threadKey, type Account, type Thread } from "@/lib/api";
 import { scopedCounts, viewUnread } from "@/lib/counts";
 import { accountTrouble, CATCHING_UP, displayName, firstName, shortDate, signedOut } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
-import { CategoryChip, CATEGORY } from "./bits";
+import { CategoryChip, CATEGORY, Ticker } from "./bits";
+import { ZeroBand } from "./inbox-zero";
 import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
 
 const ROW = 76;
+/** How long a row takes to leave or come back; nothing waits on it. */
+const ROW_MS = 170;
+const noop = () => {};
+
+type Shown = { t: Thread; top: number; selected: boolean };
+/** A row that has just left the list, drawn where it was while it collapses away. */
+type Ghost = Shown & { id: number };
+let ghostId = 0;
+
+/**
+ * Rows leaving and arriving in the list as it is (not a new view or search): left ones collapse out
+ * where they were while the rest slide up, and ones that come back (undo) or arrive slide in. Purely drawn:
+ * the list itself has already changed, so the next key acts on it at once.
+ */
+function useRowMotion(scope: string, threads: Thread[], rendered: Shown[]) {
+  const last = useRef<{ scope: string; threads: Thread[]; keys: Set<string>; rows: Shown[] } | null>(null);
+  const [ghosts, setGhosts] = useState<Ghost[]>([]);
+  const [arrived, setArrived] = useState<ReadonlySet<string>>(new Set());
+  useLayoutEffect(() => {
+    const p = last.current;
+    const keys = p?.threads === threads ? p.keys : new Set(threads.map(threadKey));
+    if (p && p.scope === scope && p.threads !== threads) {
+      const gone = p.rows.filter((r) => !keys.has(threadKey(r.t)));
+      // a handful, as triage removes them; more is a list being replaced
+      if (gone.length && gone.length <= 8) {
+        const added = gone.map((g) => ({ ...g, id: ++ghostId }));
+        const ids = new Set(added.map((g) => g.id));
+        setGhosts((gs) => [...gs, ...added]);
+        setTimeout(() => setGhosts((gs) => gs.filter((g) => !ids.has(g.id))), ROW_MS + 40);
+      }
+      const fresh = rendered.map((r) => threadKey(r.t)).filter((k) => !p.keys.has(k));
+      if (fresh.length && fresh.length <= 5) {
+        setArrived(new Set(fresh));
+        setTimeout(() => setArrived(new Set()), ROW_MS + 60);
+      }
+    }
+    last.current = { scope, threads, keys, rows: rendered };
+  });
+  return { ghosts, arrived };
+}
 
 export const VIEW_TITLES: Record<string, string> = {
   inbox: "Inbox", "needs-reply": "Needs reply", starred: "Starred", sent: "Sent", all: "All mail", trash: "Trash", spam: "Spam",
@@ -107,6 +148,11 @@ export function ThreadList() {
 
   const v = useVirtualizer({ count: threads.length, getScrollElement: () => parent.current, estimateSize: () => ROW, overscan: 12 });
   const items = v.getVirtualItems();
+  const { ghosts, arrived } = useRowMotion(
+    `${view}\u0000${account}\u0000${query}`,
+    threads,
+    items.flatMap((it) => (threads[it.index] ? [{ t: threads[it.index], top: it.start, selected: threadKey(threads[it.index]) === selected }] : [])),
+  );
 
   useEffect(() => {
     const last = items.at(-1);
@@ -122,6 +168,11 @@ export function ThreadList() {
 
   // from the server's counts, so it agrees with the sidebar however many pages are loaded
   const unread = query ? undefined : viewUnread(view, scopedCounts(data?.counts, account));
+  // in the inbox, how far you've come toward zero unread today: what you cleared against what's left
+  const triaging = view === "inbox" && !query;
+  const { data: stats } = useStats(account);
+  const cleared = triaging ? (stats?.cleared ?? 0) : 0;
+  const progress = cleared ? cleared / (cleared + (unread ?? 0)) : 0;
   const acc = account ? accounts.get(account) : undefined;
   const broken = useMemo(() => [...accounts.values()].filter((a) => a.status === "error" && (!account || a.id === account)), [accounts, account]);
   const limited = useMemo(() => [...accounts.values()].filter((a) => a.status === "limited" && (!account || a.id === account)), [accounts, account]);
@@ -129,7 +180,7 @@ export function ThreadList() {
   return (
     // below ~1200 px the list gives up width (down to 320 px) so the reader isn't squeezed
     <section aria-label="Conversations" className="flex w-[clamp(320px,calc(50vw-180px),420px)] shrink-0 flex-col border-r bg-background">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+      <header className="relative flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <motion.h1 key={view} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="text-[14px] font-semibold tracking-tight">
           {viewTitle(view)}
         </motion.h1>
@@ -139,10 +190,27 @@ export function ThreadList() {
             <span className="truncate">{acc.email}</span>
           </span>
         )}
-        {!!unread && <span className="shrink-0 text-[12px] text-muted-foreground">{unread} unread</span>}
+        {!!unread && (
+          <span className="shrink-0 text-[12px] text-muted-foreground">
+            <Ticker value={unread} /> unread
+          </span>
+        )}
+        {!!cleared && (
+          <span className="ml-auto shrink-0 text-[12px] text-muted-foreground" title="Threads you read or took out of the inbox today">
+            <Ticker value={cleared} /> cleared today
+          </span>
+        )}
+        {!!cleared && (
+          <span
+            aria-hidden
+            className="absolute -bottom-px left-0 h-px bg-brand/70 transition-[width] duration-300 ease-(--ease-snap) motion-reduce:transition-none"
+            style={{ width: `${progress * 100}%` }}
+          />
+        )}
       </header>
       <SearchBox value={query} onChange={setQuery} />
       {!!broken.length && !(acc && !threads.length) && <BrokenBanner accounts={broken} />}
+      {!isLoading && !!threads.length && <ZeroBand />}
       {!!limited.length && (
         <div role="status" className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/60 px-4 text-[12px] text-muted-foreground">
           <HourglassIcon className="size-3.5 shrink-0" />
@@ -172,14 +240,38 @@ export function ThreadList() {
           <Empty view={view} query={query} />
         ) : (
           <div style={{ height: v.getTotalSize() + (isFetchNextPageError ? 48 : 0) }} className="relative">
+            {ghosts.map((g) => (
+              <div
+                key={g.id}
+                aria-hidden
+                inert
+                className="row-out pointer-events-none absolute inset-x-0 top-0"
+                style={{ height: ROW, transform: `translateY(${g.top}px)`, "--row-ms": `${ROW_MS}ms` } as CSSProperties}
+              >
+                <Row
+                  t={g.t}
+                  account={multi ? accounts.get(g.t.account_id) : undefined}
+                  showAccount={!account}
+                  selected={g.selected}
+                  showCategory={!view.startsWith("category:")}
+                  labelNames={labelNames}
+                  hideLabel={view.startsWith("label:") ? view.slice(6) : undefined}
+                  onSelect={noop}
+                  onHover={noop}
+                />
+              </div>
+            ))}
             {items.map((it) => {
               const t = threads[it.index];
               const key = threadKey(t);
               return (
                 <div
                   key={key}
-                  className="absolute inset-x-0 top-0 transition-transform duration-200 ease-(--ease-snap)"
-                  style={{ height: ROW, transform: `translateY(${it.start}px)` }}
+                  className={cn(
+                    "absolute inset-x-0 top-0 transition-transform duration-[170ms] ease-(--ease-snap) motion-reduce:transition-none",
+                    arrived.has(key) && "row-in",
+                  )}
+                  style={{ height: ROW, transform: `translateY(${it.start}px)`, "--row-ms": `${ROW_MS}ms` } as CSSProperties}
                 >
                   <Row
                     t={t}

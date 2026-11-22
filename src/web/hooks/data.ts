@@ -1,10 +1,14 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, ApiError, onSignedOut, threadKey, type AccountsResponse, type Action, type Counts, type Session, type Thread } from "@/lib/api";
+import { api, ApiError, onSignedOut, threadKey, type AccountsResponse, type Action, type Counts, type Session, type Stats, type Thread } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
 export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: api.accounts, staleTime: 10_000 });
+
+/** What you cleared today and your streak, for one account or All accounts (null). */
+export const useStats = (account: string | null) =>
+  useQuery({ queryKey: ["stats", account], queryFn: () => api.stats(account), staleTime: 30_000 });
 
 type Page = { threads: Thread[]; next: string | null };
 
@@ -103,20 +107,21 @@ const newer = (a: Thread, b: Thread) =>
   a.last_date !== b.last_date ? a.last_date > b.last_date : a.account_id !== b.account_id ? a.account_id > b.account_id : a.thread_id > b.thread_id;
 
 /** What a thread adds to the sidebar's counts, as the server counts them. */
+const inInbox = (t: Thread) => !!t.in_inbox && !t.in_trash && !t.in_spam;
 function tally(t: Thread) {
-  const inbox = !!t.in_inbox && !t.in_trash && !t.in_spam;
-  return { unread: +(inbox && !!t.unread), reply: +(inbox && !!t.needs_reply) };
+  const inbox = inInbox(t);
+  return { inbox: +inbox, unread: +(inbox && !!t.unread), reply: +(inbox && !!t.needs_reply) };
 }
 /** The counts once `from` has become `to`. */
 function recount(c: Counts, from: Thread, to: Thread): Counts {
   const a = tally(from), b = tally(to);
-  const du = b.unread - a.unread, dr = b.reply - a.reply;
+  const di = b.inbox - a.inbox, du = b.unread - a.unread, dr = b.reply - a.reply;
   const acc = c.accounts[to.account_id];
-  if ((!du && !dr) || !acc) return c;
+  if ((!di && !du && !dr) || !acc) return c;
   const cat = to.category;
   const bump = (m: Record<string, number>) => (cat && du ? { ...m, [cat]: Math.max(0, (m[cat] ?? 0) + du) } : m);
   return {
-    accounts: { ...c.accounts, [to.account_id]: { inboxUnread: Math.max(0, acc.inboxUnread + du), needsReply: Math.max(0, acc.needsReply + dr), categories: bump(acc.categories) } },
+    accounts: { ...c.accounts, [to.account_id]: { inbox: Math.max(0, (acc.inbox ?? 0) + di), inboxUnread: Math.max(0, acc.inboxUnread + du), needsReply: Math.max(0, acc.needsReply + dr), categories: bump(acc.categories) } },
     categories: bump(c.categories),
   };
 }
@@ -127,13 +132,55 @@ function setCounts(qc: QueryClient, fn: (c: Counts) => Counts) {
   qc.setQueryData<AccountsResponse>(["accounts"], (d) => d && { ...d, counts: fn(d.counts) });
 }
 
+/**
+ * Threads counted as cleared today on this page, and why: read, taken out of the inbox, or both. As on the server,
+ * a thread counts once, and stops counting only once neither holds (Mark unread, undoing the removal).
+ */
+const cleared = new Map<string, { read: boolean; removed: boolean }>();
+/** Taking a thread out of the inbox, and what an undo of each sends (src/server/stats.ts has the same). */
+const REMOVES = new Set<Action>(["archive", "trash", "spam"]);
+const UNREMOVES = new Set<Action>(["inbox", "untrash", "notspam"]);
+
+/**
+ * The day's stats once these actions land, before the server says so: a thread cleared (read while unread
+ * in the inbox, or taken out of it) counts once, in its account and All accounts; zero unread, once reached, marks the day.
+ */
+function bumpStats(qc: QueryClient, before: Thread[], action: Action, undo: boolean) {
+  const delta = new Map<string | null, number>();
+  for (const t of before) {
+    const k = threadKey(t);
+    const was = cleared.get(k) ?? { read: false, removed: false };
+    const now = { ...was };
+    if (action === "unread") now.read = false;
+    else if (undo && UNREMOVES.has(action)) now.removed = false;
+    else if (!undo && inInbox(t) && action === "read" && t.unread) now.read = true;
+    else if (!undo && inInbox(t) && REMOVES.has(action)) now.removed = true;
+    const before = was.read || was.removed, after = now.read || now.removed;
+    if (after) cleared.set(k, now);
+    else cleared.delete(k);
+    const d = +after - +before;
+    for (const scope of [t.account_id, null]) delta.set(scope, (delta.get(scope) ?? 0) + d);
+  }
+  const counts = qc.getQueryData<AccountsResponse>(["accounts"])?.counts;
+  for (const [[, scope], s] of qc.getQueriesData<Stats>({ queryKey: ["stats"] })) {
+    if (!s) continue;
+    const d = delta.get(scope as string | null) ?? 0;
+    const zero = !!counts && (scope ? (counts.accounts[scope as string]?.inboxUnread ?? 0) : Object.values(counts.accounts).reduce((n, c) => n + c.inboxUnread, 0)) === 0;
+    // the server marks zero only for an action you take in Tern: one that cleared something here
+    const reached = zero && !s.zeroToday && d > 0;
+    if (!d && !reached) continue;
+    void qc.cancelQueries({ queryKey: ["stats", scope] });
+    qc.setQueryData<Stats>(["stats", scope], { ...s, cleared: Math.max(0, s.cleared + d), zeroToday: s.zeroToday || reached, streak: s.streak + +reached });
+  }
+}
+
 /** Actions sent and not yet answered: until they are, a refetched list can still have them undone. */
 let inFlight = 0;
 
 export const useActions = () => makeActions(useQueryClient());
 
 export function makeActions(qc: QueryClient) {
-  return async function act(threads: Thread[], action: Action, opts: { quiet?: boolean } = {}) {
+  return async function act(threads: Thread[], action: Action, opts: { quiet?: boolean; undo?: boolean } = {}) {
     const { view } = useStore.getState();
     const actions = new Set(threads.map((t) => resolve(t, action)));
     if (actions.size === 1) action = [...actions][0];
@@ -162,9 +209,10 @@ export function makeActions(qc: QueryClient) {
     });
     for (const t of threads) qc.setQueryData<{ thread: Thread }>(["thread", threadKey(t)], (d) => (d ? { ...d, thread: patch(d.thread, resolve(d.thread, action)) } : d));
     setCounts(qc, (c) => before.reduce((c, t) => recount(c, t, patch(t, resolve(t, action))), c));
+    bumpStats(qc, before, action, !!opts.undo);
 
     inFlight++;
-    const results = await Promise.allSettled(threads.map((t) => api.act(t.account_id, t.thread_id, resolve(t, action))));
+    const results = await Promise.allSettled(threads.map((t) => api.act(t.account_id, t.thread_id, resolve(t, action), opts.undo)));
     inFlight--;
     const failed = results.flatMap((r, i) => (r.status === "rejected" ? [{ t: before[i], e: r.reason as Error }] : []));
     if (!failed.length) {
@@ -173,7 +221,7 @@ export function makeActions(qc: QueryClient) {
       if (undo && seq && seq === lastAction) {
         const run = () => {
           if (lastUndo === run) lastUndo = null;
-          void act(threads, undo, { quiet: true });
+          void act(threads, undo, { quiet: true, undo: true });
           toast.dismiss(id);
         };
         const forget = () => {
@@ -192,7 +240,10 @@ export function makeActions(qc: QueryClient) {
       const e = failed[0].e;
       if (!(e instanceof ApiError && e.status === 401)) toast.error(`Couldn't ${action}: ${e.message}`);
     }
-    if (!inFlight) void qc.invalidateQueries({ queryKey: ["accounts"] });
+    if (!inFlight) {
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["stats"] });
+    }
   };
 }
 

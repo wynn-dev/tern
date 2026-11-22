@@ -43,7 +43,7 @@ let sent: string[];
 let threadDelay: number;
 const counts = () => {
   const n = server.filter((t) => t.unread && t.in_inbox).length;
-  return { accounts: { a: { inboxUnread: n, needsReply: 0, categories: { work: n } } }, categories: { work: n } };
+  return { accounts: { a: { inbox: server.filter((t) => t.in_inbox).length, inboxUnread: n, needsReply: 0, categories: { work: n } } }, categories: { work: n } };
 };
 const accounts = (): AccountsResponse => ({
   accounts: [{ id: "a", email: "me@x.io", name: "", color: "oklch(0.6 0.17 260)", status: "idle", error: null, connected: true }],

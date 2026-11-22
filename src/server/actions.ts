@@ -1,6 +1,7 @@
 import { getAccount, getThread, setMessageLabels, threadMessages, upsertMessages } from "./db";
 import { events } from "./events";
 import { gmail } from "./gmail";
+import { recordAction } from "./stats";
 import { buildRaw, fromGmail, invalidAddresses, parseAddressList, type Outgoing } from "./mime";
 
 export const ACTIONS = ["archive", "inbox", "star", "unstar", "read", "unread", "trash", "untrash", "spam", "notspam"] as const;
@@ -21,10 +22,13 @@ const labelChange: Record<Action, [add: string[], remove: string[]]> = {
 
 /**
  * Apply locally first so the UI never waits on Google, then on Gmail;
- * if Gmail refuses, put the labels back.
+ * if Gmail refuses, put the labels back. Once it's done, it counts toward the day's triage stats;
+ * `undo` says it takes back the action before it, so that one stops counting.
  */
-export async function applyAction(accountId: string, threadId: string, action: Action, demo: boolean) {
+export async function applyAction(accountId: string, threadId: string, action: Action, demo: boolean, undo = false) {
   const before = threadMessages(accountId, threadId);
+  const wasInInbox = before.some((m) => m.labels.includes("INBOX")) && !before.some((m) => m.labels.includes("TRASH") || m.labels.includes("SPAM"));
+  const wasUnread = before.some((m) => m.labels.includes("UNREAD"));
   // "Move to inbox" on a trashed or spam thread takes it out of there, or it stays stuck in Trash
   if (action === "inbox" && before.some((m) => m.labels.includes("TRASH"))) action = "untrash";
   else if (action === "inbox" && before.some((m) => m.labels.includes("SPAM"))) action = "notspam";
@@ -38,7 +42,7 @@ export async function applyAction(accountId: string, threadId: string, action: A
     setMessageLabels(accountId, m.id, [...next]);
   }
   events.emit({ type: "threads", keys: [[accountId, threadId]] });
-  if (demo) return;
+  if (demo) return recordAction(accountId, threadId, action, { wasInInbox, wasUnread, undo });
   try {
     if (action === "trash") await gmail.trashThread(accountId, threadId);
     else if (action === "untrash") await gmail.untrashThread(accountId, threadId);
@@ -51,6 +55,7 @@ export async function applyAction(accountId: string, threadId: string, action: A
     events.emit({ type: "threads", keys: [[accountId, threadId]] });
     throw e;
   }
+  recordAction(accountId, threadId, action, { wasInInbox, wasUnread, undo });
 }
 
 /** A send the server refuses as asked, answered with a 400 and its message. */

@@ -160,7 +160,7 @@ test("z undoes the last archive, once", async () => {
     press("z");
     press("z");
     await Bun.sleep(0);
-    expect(calls).toEqual(["/api/threads/a/linear/archive", "/api/threads/a/linear/inbox"]);
+    expect(calls).toEqual(["/api/threads/a/linear/archive", "/api/threads/a/linear/inbox?undo=1"]);
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -234,8 +234,8 @@ test("z undoes the later of two archives, even when the earlier one answers last
     await first;
     press("z");
     await Bun.sleep(0);
-    expect(calls.at(-1)).toBe("/api/threads/a/linear/inbox");
-    expect(calls.filter((c) => c.endsWith("/inbox"))).toHaveLength(1);
+    expect(calls.at(-1)).toBe("/api/threads/a/linear/inbox?undo=1");
+    expect(calls.filter((c) => c.endsWith("/inbox?undo=1"))).toHaveLength(1);
   });
 });
 
