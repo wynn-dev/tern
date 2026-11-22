@@ -38,6 +38,7 @@ const thread = (i: number, unread: number): Thread => ({
 let server: Thread[];
 let stats: Stats;
 const clearedIds = new Set<string>();
+let statsHeld = false;
 /** Actions wait on this before the server answers: what shows meanwhile is the client's own. */
 let answered: Promise<void> = Promise.resolve();
 let answer = () => {};
@@ -61,7 +62,7 @@ g.fetch = async (url: string, init?: RequestInit) => {
       clearedIds.add(act[2]);
       stats = { ...stats, cleared: stats.cleared + 1 };
     }
-    server = server.map((t) => (t.thread_id !== act[2] ? t : act[3] === "read" ? { ...t, unread: 0 } : act[3] === "archive" ? { ...t, in_inbox: 0 } : t));
+    server = server.map((t) => (t.thread_id !== act[2] ? t : act[3] === "read" ? { ...t, unread: 0 } : act[3] === "archive" ? { ...t, in_inbox: 0 } : act[3] === "inbox" ? { ...t, in_inbox: 1 } : t));
     return json({ ok: true });
   }
   const one = path.match(/^\/api\/threads\/(\w+)\/(\w+)$/);
@@ -75,7 +76,8 @@ g.fetch = async (url: string, init?: RequestInit) => {
   }
   if (path === "/api/threads") return json({ threads: server.filter((t) => t.in_inbox), next: null });
   if (path === "/api/accounts") return json(accounts());
-  if (path === "/api/stats") return json(stats);
+  // held: the count shown is the client's own, never a refetch
+  if (path === "/api/stats") return statsHeld ? new Promise<Response>(() => {}) : json(stats);
   if (path === "/api/session") return json({ authed: true, passwordRequired: false, demo: true });
   return new Response("{}", { status: 404 });
 };
@@ -109,6 +111,7 @@ async function render() {
 beforeEach(() => {
   resetZeroMoment();
   stats = { today: "2026-11-22", cleared: 0, zeroToday: false, streak: 2, days: [] };
+  statsHeld = false;
   useStore.setState({ view: "inbox", account: null, query: "", selected: null, compose: null, settingsOpen: false, paletteOpen: false });
 });
 afterEach(async () => {
@@ -195,4 +198,28 @@ test("archiving moves on to the next thread at once, counts it, and draws the ro
   await wait(50);
   // read and archived is one thread cleared, and the next one read is another
   expect(header()).toContain("2 cleared today");
+});
+
+test("undoing an archive takes it back off today's count at once, and archiving it again counts it again", async () => {
+  // already read: only the archive counts
+  server = [thread(20, 0), thread(21, 0)];
+  stats = { ...stats, cleared: 2 };
+  statsHeld = true;
+  await render();
+  await press("j");
+  expect(header()).toContain("2 cleared today");
+  await press("e");
+  expect(header()).toContain("3 cleared today");
+  // the undo is there once the archive has been answered
+  await wait(50);
+  await press("z");
+  expect(header()).toContain("2 cleared today");
+  await wait(50);
+  // the list refetched, as the live updates have it: the thread is back
+  await act(() => qc.invalidateQueries({ queryKey: ["threads"] }));
+  await wait(50);
+  await press("k");
+  expect(useStore.getState().selected).toBe("a:t20");
+  await press("e");
+  expect(header()).toContain("3 cleared today");
 });

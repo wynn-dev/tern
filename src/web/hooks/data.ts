@@ -132,10 +132,14 @@ function setCounts(qc: QueryClient, fn: (c: Counts) => Counts) {
   qc.setQueryData<AccountsResponse>(["accounts"], (d) => d && { ...d, counts: fn(d.counts) });
 }
 
-/** Threads counted as cleared today on this page, so reading one and then archiving it counts it once, as the server does. */
-const cleared = new Set<string>();
-/** Taking a thread out of the inbox; undoing it is the action in `UNDO`. */
+/**
+ * Threads counted as cleared today on this page, and why: read, taken out of the inbox, or both. As on the server,
+ * a thread counts once, and stops counting only once neither holds (Mark unread, undoing the removal).
+ */
+const cleared = new Map<string, { read: boolean; removed: boolean }>();
+/** Taking a thread out of the inbox, and what an undo of each sends (src/server/stats.ts has the same). */
 const REMOVES = new Set<Action>(["archive", "trash", "spam"]);
+const UNREMOVES = new Set<Action>(["inbox", "untrash", "notspam"]);
 
 /**
  * The day's stats once these actions land, before the server says so: a thread cleared (read while unread
@@ -145,12 +149,16 @@ function bumpStats(qc: QueryClient, before: Thread[], action: Action, undo: bool
   const delta = new Map<string | null, number>();
   for (const t of before) {
     const k = threadKey(t);
-    let d = 0;
-    if (action === "unread" || (undo && UNDO[action] && REMOVES.has(UNDO[action]!))) d = cleared.delete(k) ? -1 : 0;
-    else if (!undo && inInbox(t) && ((action === "read" && t.unread) || REMOVES.has(action)) && !cleared.has(k)) {
-      cleared.add(k);
-      d = 1;
-    }
+    const was = cleared.get(k) ?? { read: false, removed: false };
+    const now = { ...was };
+    if (action === "unread") now.read = false;
+    else if (undo && UNREMOVES.has(action)) now.removed = false;
+    else if (!undo && inInbox(t) && action === "read" && t.unread) now.read = true;
+    else if (!undo && inInbox(t) && REMOVES.has(action)) now.removed = true;
+    const before = was.read || was.removed, after = now.read || now.removed;
+    if (after) cleared.set(k, now);
+    else cleared.delete(k);
+    const d = +after - +before;
     for (const scope of [t.account_id, null]) delta.set(scope, (delta.get(scope) ?? 0) + d);
   }
   const counts = qc.getQueryData<AccountsResponse>(["accounts"])?.counts;

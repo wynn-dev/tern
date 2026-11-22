@@ -6,5 +6,5 @@ test("the inbox-zero moment shows at zero unread, and triage counts down to it (
   const out = run.stderr.toString() + run.stdout.toString();
   if (run.exitCode !== 0) console.error(out);
   expect(run.exitCode).toBe(0);
-  expect(out).toMatch(/\b5 pass\b/);
+  expect(out).toMatch(/\b6 pass\b/);
 }, 60_000);
