@@ -119,8 +119,16 @@ afterEach(async () => {
   unmount = undefined;
 });
 
-const press = (key: string) => act(() => void document.body.dispatchEvent(new win.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }) as unknown as Event));
 const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
+/**
+ * A key, and what it renders: React Query hands cache updates to React on a timer (its notifyManager), which a
+ * synchronous act() doesn't always wait for. Every action's server answer is held where a test says "at once",
+ * so this little wait never lets one in.
+ */
+async function press(key: string) {
+  act(() => void document.body.dispatchEvent(new win.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }) as unknown as Event));
+  await wait(10);
+}
 const list = () => document.querySelector('section[aria-label="Conversations"]')!;
 const header = () => list().querySelector("header")?.textContent ?? "";
 const band = () => list().querySelector('[role="status"][aria-label="Zero unread"]');
