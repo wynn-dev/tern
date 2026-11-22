@@ -1,7 +1,7 @@
 import { getAccount, getThread, setMessageLabels, threadMessages, upsertMessages } from "./db";
 import { events } from "./events";
 import { gmail } from "./gmail";
-import { buildRaw, fromGmail, parseAddressList, type Outgoing } from "./mime";
+import { buildRaw, fromGmail, invalidAddresses, parseAddressList, type Outgoing } from "./mime";
 
 export const ACTIONS = ["archive", "inbox", "star", "unstar", "read", "unread", "trash", "untrash", "spam", "notspam"] as const;
 export type Action = (typeof ACTIONS)[number];
@@ -50,6 +50,9 @@ export async function applyAction(accountId: string, threadId: string, action: A
   }
 }
 
+/** A send the server refuses as asked, answered with a 400 and its message. */
+export class SendError extends Error {}
+
 export type SendInput = {
   accountId: string;
   to: string;
@@ -64,10 +67,15 @@ export type SendInput = {
 export async function send(input: SendInput, demo: boolean) {
   const acc = getAccount(input.accountId);
   if (!acc) throw new Error("No such account");
+  for (const field of ["to", "cc", "bcc"] as const) {
+    const bad = invalidAddresses(input[field]);
+    if (bad.length) throw new SendError(`${bad.map((b) => `“${b}”`).join(", ")} ${bad.length > 1 ? "aren't email addresses" : "isn't an email address"}`);
+  }
   let inReplyTo: string | undefined, references: string | undefined;
   if (input.threadId) {
     const t = getThread(input.accountId, input.threadId);
-    const last = t?.messages.at(-1);
+    if (!t) throw new SendError(`This conversation isn't in ${acc.email}, so the reply can't be sent from it`);
+    const last = t.messages.at(-1);
     inReplyTo = last?.message_id || undefined;
     references = last?.references || undefined;
   }
@@ -82,7 +90,7 @@ export async function send(input: SendInput, demo: boolean) {
     inReplyTo,
     references,
   };
-  if (!out.to.length) throw new Error("Add at least one recipient");
+  if (!out.to.length) throw new SendError("Add at least one recipient");
   if (demo) {
     const id = `demo-sent-${Date.now()}`;
     const keys = upsertMessages([{

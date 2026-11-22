@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { streamSSE } from "hono/streaming";
 import { existsSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
-import { ACTIONS, applyAction, send, type Action } from "./actions";
+import { ACTIONS, applyAction, send, SendError, type Action } from "./actions";
 import { AiError, aiStatus, classifyPending, draftReply, summarizeThread } from "./ai";
 import { loadConfig, saveConfig, type Config } from "./config";
 import { randomId, sign, verify } from "./crypto";
@@ -210,6 +210,7 @@ export function createApp(opts: AppOptions) {
 
   app.onError((err, c) => {
     if (err instanceof AiError) return c.json({ error: err.message, code: err.code }, err.httpStatus);
+    if (err instanceof SendError) return c.json({ error: err.message }, 400);
     console.error(`[api] ${c.req.method} ${c.req.path}:`, err.message);
     return c.json({ error: err.message }, 500);
   });
