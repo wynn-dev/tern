@@ -36,12 +36,15 @@ export const CATEGORY: Record<string, { label: string; icon: LucideIcon; color: 
 
 export const categoryMeta = (c: string | null) => (c ? CATEGORY[c] : undefined) ?? { label: "Inbox", icon: InboxIcon, color: "var(--muted-foreground)" };
 
+/** The same oklch hue at another lightness: chip text that stays readable on the chip's tint. */
+export const shade = (color: string, l: number) => color.replace(/^oklch\(\s*[\d.]+/, `oklch(${l}`);
+
 export function CategoryChip({ category, className }: { category: string; className?: string }) {
   const m = categoryMeta(category);
   return (
     <span
-      className={cn("inline-flex h-[18px] items-center gap-1 rounded-full px-1.5 text-[10.5px] font-medium", className)}
-      style={{ color: m.color, background: `color-mix(in oklch, ${m.color} 12%, transparent)` }}
+      className={cn("inline-flex h-[18px] items-center gap-1 rounded-full px-1.5 text-[10.5px] font-medium text-(--ink) dark:text-(--ink-dark)", className)}
+      style={{ "--ink": shade(m.color, 0.47), "--ink-dark": shade(m.color, 0.76), background: `color-mix(in oklch, ${m.color} 12%, transparent)` } as React.CSSProperties}
     >
       <m.icon className="size-2.5" strokeWidth={2.5} />
       {m.label}

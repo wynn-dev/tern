@@ -14,6 +14,8 @@ export type ComposeDraft = {
   quoted?: string;
   /** Shown above the body and never sent, e.g. that a forward leaves the attachments out. */
   note?: string;
+  /** Written for you (an AI draft): work you'd lose from the start, so closing it asks like an edited one. */
+  generated?: boolean;
 };
 
 type State = {
@@ -52,8 +54,9 @@ export const editCompose = (d: ComposeDraft) => {
 };
 
 const fields = (d: ComposeDraft) => [d.to, d.cc, d.subject, d.text].map((v) => v.trim()).join("\u0000");
-/** Edited since it was opened: a Forward's copied message or a reply's prefilled To don't count. */
-export const isDirty = (opened: ComposeDraft | null) => !!opened && !!live && live.id === opened.id && fields(live) !== fields(opened);
+/** Edited since it was opened, or written by the AI: a Forward's copied message or a reply's prefilled To don't count. */
+export const isDirty = (opened: ComposeDraft | null) =>
+  !!opened && !!live && live.id === opened.id && (!!opened.generated || fields(live) !== fields(opened));
 
 const confirmDiscard = () => confirm("Discard the draft you're writing?");
 

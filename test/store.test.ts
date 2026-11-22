@@ -78,3 +78,18 @@ test("closing asks first only when the draft has edits", () => {
   expect(s().compose).toBeNull();
   expect(asked).toBe(2);
 });
+
+test("an AI-drafted reply counts as edited: X, Esc or another compose asks first", () => {
+  s().openCompose({ ...reply, text: "Thursday works for me.", generated: true });
+  expect(s().discardCompose()).toBe(false);
+  expect(asked).toBe(1);
+  expect(s().compose).not.toBeNull();
+
+  s().openCompose();
+  expect(asked).toBe(2);
+  expect(liveDraft()!.text).toBe("Thursday works for me.");
+  // r on the same thread brings it back rather than asking
+  s().openCompose(reply);
+  expect(asked).toBe(2);
+  expect(liveDraft()!.text).toBe("Thursday works for me.");
+});

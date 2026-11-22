@@ -1,12 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDownIcon, ChevronUpIcon, Loader2Icon, Maximize2Icon, Minimize2Icon, MinusIcon, MoreHorizontalIcon, PaperclipIcon, SendIcon, XIcon } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { useAccounts } from "@/hooks/data";
 import { api } from "@/lib/api";
 import { editCompose, isDirty, liveDraft, useStore, type ComposeDraft } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import { Button } from "./ui/button";
 import { invalidAddresses } from "../../server/mime";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
@@ -48,16 +48,33 @@ function ComposerPanel({ initial }: { initial: ComposeDraft }) {
   const bad = { to: invalidAddresses(d.to), cc: invalidAddresses(d.cc) };
   const problem = checked.to && bad.to.length ? notAddresses(bad.to) : checked.cc && bad.cc.length ? notAddresses(bad.cc) : null;
 
+  // focus moves into the draft as it opens, and back to where you were (the Reply button, the list) as it
+  // closes or is minimized, so a minimized draft never holds the keyboard away from the thread
+  const opener = useRef<HTMLElement | null>(null);
+  const giveBack = () => {
+    const el = opener.current;
+    if (el?.isConnected && el !== document.body) el.focus();
+    else (document.activeElement as HTMLElement | null)?.blur();
+  };
   useEffect(() => {
+    opener.current = document.activeElement as HTMLElement | null;
     (d.to ? body.current : toRef.current)?.focus();
     if (d.to) body.current?.setSelectionRange(0, 0);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const panel = useRef<HTMLDivElement>(null);
+  const holdsFocus = () => !!panel.current?.contains(document.activeElement);
   const wasMin = useRef(min);
   useEffect(() => {
     if (wasMin.current && !min) body.current?.focus();
+    if (!wasMin.current && min && holdsFocus()) giveBack();
     wasMin.current = min;
-  }, [min]);
+  }, [min]); // eslint-disable-line react-hooks/exhaustive-deps
+  // sent or discarded: as it starts to animate away, while the focus is still in it
+  const present = useIsPresent();
+  useEffect(() => {
+    if (!present && holdsFocus()) giveBack();
+  }, [present]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
@@ -108,6 +125,9 @@ function ComposerPanel({ initial }: { initial: ComposeDraft }) {
 
   return (
     <motion.div
+      ref={panel}
+      role="dialog"
+      aria-label={min ? `${title} (minimized)` : title}
       initial={{ opacity: 0, y: 24, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 16, scale: 0.98 }}
@@ -220,12 +240,18 @@ function ComposerPanel({ initial }: { initial: ComposeDraft }) {
           ref={body}
           value={d.text}
           onChange={(e) => up({ text: e.target.value })}
+          aria-label="Message"
           placeholder="Write something…"
           className="block min-h-[60%] w-full resize-none bg-transparent px-4 py-3 text-[14px] leading-relaxed outline-none placeholder:text-muted-foreground"
         />
         {d.quoted && (
           <div className="px-4 pb-4">
-            <button onClick={() => setShowQuoted((v) => !v)} className="flex h-5 items-center rounded bg-muted px-1.5 text-muted-foreground hover:text-foreground">
+            <button
+              onClick={() => setShowQuoted((v) => !v)}
+              aria-label={showQuoted ? "Hide quoted text" : "Show quoted text"}
+              aria-expanded={showQuoted}
+              className="flex h-5 items-center rounded bg-muted px-1.5 text-muted-foreground hover:text-foreground"
+            >
               <MoreHorizontalIcon className="size-3.5" />
             </button>
             {showQuoted && <pre className="mt-2 font-sans text-[12.5px] whitespace-pre-wrap text-muted-foreground">{d.quoted.trim()}</pre>}

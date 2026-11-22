@@ -13,7 +13,7 @@ import { accountTrouble } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CATEGORY, Dot } from "./bits";
-import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 import { Tooltip } from "./ui/tooltip";
 
 const NAV = [
@@ -39,7 +39,7 @@ function Item({
     <button
       onClick={onClick}
       className={cn(
-        "group relative flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-75",
+        "group relative flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-75 outline-none focus-visible:ring-2 focus-visible:ring-brand",
         active ? "text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
       )}
     >
@@ -77,11 +77,9 @@ export function Sidebar() {
           </svg>
           <span className="text-[14px] font-semibold tracking-tight">Tern</span>
         </div>
-        <Tooltip label="New message" kbd="C">
-          <Button size="icon-sm" variant="ghost" onClick={() => openCompose()}>
-            <PenSquareIcon />
-          </Button>
-        </Tooltip>
+        <IconButton label="New message" kbd="C" onClick={() => openCompose()}>
+          <PenSquareIcon />
+        </IconButton>
       </div>
 
       <nav className="scroll-thin flex-1 space-y-5 overflow-y-auto px-2 pt-1 pb-3">
@@ -100,7 +98,7 @@ export function Sidebar() {
         </div>
 
         <div>
-          <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground/80">
+          <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
             <SparklesIcon className="size-3" /> Smart views
           </div>
           <div className="space-y-px">
@@ -115,7 +113,7 @@ export function Sidebar() {
 
         {!!labels.length && (
           <div>
-            <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground/80">
+            <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
               <TagIcon className="size-3" /> Labels
             </div>
             <div className="space-y-px">
@@ -130,10 +128,10 @@ export function Sidebar() {
         )}
 
         <div>
-          <div className="mb-1 flex items-center justify-between px-2 text-[11px] font-medium text-muted-foreground/80">
+          <div className="mb-1 flex items-center justify-between px-2 text-[11px] font-medium text-muted-foreground">
             Accounts
             <Tooltip label="Add a Gmail account">
-              <button className="rounded p-0.5 hover:bg-accent hover:text-foreground" onClick={() => set({ settingsOpen: true })}>
+              <button aria-label="Add a Gmail account" className="rounded p-0.5 hover:bg-accent hover:text-foreground" onClick={() => set({ settingsOpen: true })}>
                 <PlusIcon className="size-3.5" />
               </button>
             </Tooltip>
@@ -178,16 +176,12 @@ export function Sidebar() {
       </nav>
 
       <div className="flex items-center gap-1 border-t px-2 py-2">
-        <Tooltip label="Settings" kbd=",">
-          <Button size="icon-sm" variant="ghost" onClick={() => set({ settingsOpen: true })}>
-            <SettingsIcon />
-          </Button>
-        </Tooltip>
-        <Tooltip label={`${THEME[pref].label} · click for ${THEME[nextPref(pref)].label.toLowerCase()}`}>
-          <Button size="icon-sm" variant="ghost" onClick={cycle}>
-            <ThemeIcon />
-          </Button>
-        </Tooltip>
+        <IconButton label="Settings" kbd="," onClick={() => set({ settingsOpen: true })}>
+          <SettingsIcon />
+        </IconButton>
+        <IconButton label={`${THEME[pref].label} · click for ${THEME[nextPref(pref)].label.toLowerCase()}`} onClick={cycle}>
+          <ThemeIcon />
+        </IconButton>
         <div className="flex-1" />
         <Tooltip
           label={!ai?.enabled ? "AI is off" : !ai.claudePath ? "Install Claude Code to turn on AI" : (ai.lastError ?? `Claude: ${ai.claudePath}`)}

@@ -3,13 +3,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircleIcon, Loader2Icon, PaperclipIcon, SearchIcon, SparklesIcon, StarIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { prefetchThread, useAccounts, useThreads } from "@/hooks/data";
 import { api, threadKey, type Account, type Thread } from "@/lib/api";
 import { scopedCounts, viewUnread } from "@/lib/counts";
 import { accountTrouble, displayName, firstName, shortDate, signedOut } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import { CategoryChip, categoryMeta, CATEGORY } from "./bits";
 import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
@@ -56,6 +56,7 @@ const Row = memo(function Row({
       onMouseEnter={onHover}
       className={cn(
         "group relative flex h-full w-full flex-col justify-center gap-px border-b border-border/60 py-2 pr-4 pl-[26px] text-left leading-[19px] transition-colors duration-75",
+        "outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset",
         selected ? "bg-selected" : "hover:bg-accent/50",
       )}
     >
@@ -66,7 +67,7 @@ const Row = memo(function Row({
           {participantsLabel(t, account?.email)}
         </span>
         {t.count > 1 && <span className="font-mono text-[11px] text-muted-foreground">{t.count}</span>}
-        {!!t.needs_reply && <span className="rounded-full bg-amber-500/12 px-1.5 text-[10.5px] font-medium text-amber-600 dark:text-amber-400">Reply</span>}
+        {!!t.needs_reply && <span className="rounded-full bg-amber-500/12 px-1.5 text-[10.5px] font-medium text-amber-800 dark:text-amber-400">Reply</span>}
         <span className="flex-1" />
         {!!t.has_attachments && <PaperclipIcon className="size-3 text-muted-foreground" />}
         {!!t.starred && <StarIcon className="size-3 fill-amber-400 text-amber-400" />}
@@ -130,7 +131,7 @@ export function ThreadList() {
 
   return (
     // below ~1200 px the list gives up width (down to 320 px) so the reader isn't squeezed
-    <section className="flex w-[clamp(320px,calc(50vw-180px),420px)] shrink-0 flex-col border-r bg-background">
+    <section aria-label="Conversations" className="flex w-[clamp(320px,calc(50vw-180px),420px)] shrink-0 flex-col border-r bg-background">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <motion.h1 key={view} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="text-[14px] font-semibold tracking-tight">
           {viewTitle(view)}
@@ -212,6 +213,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
       <SearchIcon className="size-3.5" />
       <input
         id="search"
+        aria-label="Search mail"
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         onKeyDown={(e) => {
@@ -226,7 +228,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
         className="h-full flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
       />
       {local ? (
-        <button onClick={() => (setLocal(""), onChange(""))} className="rounded p-0.5 hover:bg-accent">
+        <button aria-label="Clear search" onClick={() => (setLocal(""), onChange(""))} className="rounded p-0.5 hover:bg-accent">
           <XIcon className="size-3.5" />
         </button>
       ) : (
@@ -310,6 +312,12 @@ function BrokenBanner({ accounts }: { accounts: Account[] }) {
   );
 }
 
+/** Why a broken account shows nothing, and what to do: once, when the server's error already says to reconnect. */
+export function brokenHint(a: Pick<Account, "error">) {
+  const why = a.error ?? "Tern can't reach this account.";
+  return /reconnect/i.test(why) ? why : `${why} Reconnect it to see its mail.`;
+}
+
 /** A broken account with nothing synced: say so, never "Inbox zero". */
 function BrokenAccount({ account }: { account: Account }) {
   const reconnect = useReconnect();
@@ -324,7 +332,7 @@ function BrokenAccount({ account }: { account: Account }) {
       <AlertCircleIcon className="mb-3 size-8 text-destructive/70" strokeWidth={1.5} />
       <div className="max-w-full text-[14px] font-medium break-words">{accountTrouble(account)}</div>
       <div className="max-w-[320px] text-[12.5px] break-words text-muted-foreground">
-        {account.error ?? "Tern can't reach this account."} Reconnect it to see its mail.
+        {brokenHint(account)}
       </div>
       <Button variant="outline" size="sm" className="mt-3" disabled={reconnect.isPending} onClick={() => reconnect.mutate()}>
         {reconnect.isPending && <Loader2Icon className="animate-spin" />} Reconnect

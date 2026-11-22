@@ -23,6 +23,7 @@ export function DialogContent({ className, children, hideClose, ...props }: Reac
         {!hideClose && (
           <D.Close className="absolute top-4 right-4 rounded-sm p-0.5 text-muted-foreground opacity-70 transition-opacity hover:opacity-100">
             <XIcon className="size-4" />
+            <span className="sr-only">Close</span>
           </D.Close>
         )}
       </D.Content>
