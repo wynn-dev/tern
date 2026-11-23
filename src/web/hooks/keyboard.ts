@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { forwardDraft, replyDraft } from "@/components/reader";
 import { useVisibleThreads } from "@/components/thread-list";
 import { type Account, type Action, api, threadKey, type Message, type Thread } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { unreadView, useStore } from "@/lib/store";
 import { prefetchThread, staysInView, undoLast, useAccounts, useActions } from "./data";
 
 const GOTO: Record<string, string> = { i: "inbox", r: "needs-reply", s: "starred", t: "sent", a: "all", "!": "spam", "#": "trash" };
@@ -18,6 +18,7 @@ export const SHORTCUTS: [string, string][] = [
   ["!", "Spam / not spam"],
   ["S", "Star"],
   ["U", "Mark read / unread"],
+  ["V", "Inbox: unread only / all"],
   ["Z", "Undo"],
   ["R", "Reply"],
   ["A", "Reply all"],
@@ -68,6 +69,12 @@ export function keyHandler(get: () => Ctx) {
     const current: Thread | undefined = threads[i];
     const move = (d: number) => {
       const next = threads[Math.max(0, Math.min(threads.length - 1, (i < 0 ? -1 : i) + d))] ?? threads[0];
+      // in the Unread view, moving on from a read thread with nowhere to go closes it, so it leaves and the list can empty
+      if (next && next === current && !current.unread && unreadView(s)) {
+        s.select(null);
+        followFocus(el, "");
+        return;
+      }
       if (next) {
         s.select(threadKey(next));
         followFocus(el, threadKey(next));
@@ -125,6 +132,7 @@ export function keyHandler(get: () => Ctx) {
       s: () => current && void act([current], current.starred ? "unstar" : "star"),
       u: () => current && void act([current], current.unread ? "read" : "unread"),
       z: () => void undoLast(),
+      v: () => s.view === "inbox" && !s.query && s.toggleInboxShows(),
       r: () => void compose((t) => replyDraft(t.thread, t.messages, me(), false)),
       a: () => void compose((t) => replyDraft(t.thread, t.messages, me(), true)),
       f: () => void compose((t) => forwardDraft(t.thread, t.messages.at(-1)!)),

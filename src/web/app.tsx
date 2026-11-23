@@ -8,7 +8,7 @@ import { Composer } from "./components/composer";
 import { Reader } from "./components/reader";
 import { SettingsDialog } from "./components/settings";
 import { Sidebar } from "./components/sidebar";
-import { ThreadList } from "./components/thread-list";
+import { ThreadList, useZeroScreen } from "./components/thread-list";
 import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
@@ -75,13 +75,23 @@ function Mail() {
   return (
     <div className="flex h-full">
       <Sidebar />
-      <ThreadList />
-      <Reader />
+      <Panes />
       <Composer />
       <CommandPalette />
       <SettingsDialog />
       <ShortcutsDialog />
     </div>
+  );
+}
+
+/** The list and the reader; at zero in the Unread view, the list holds the moment across both. */
+function Panes() {
+  const zero = useZeroScreen();
+  return (
+    <>
+      <ThreadList />
+      {!zero && <Reader />}
+    </>
   );
 }
 

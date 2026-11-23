@@ -112,7 +112,8 @@ beforeEach(() => {
   resetZeroMoment();
   stats = { today: "2026-11-22", cleared: 0, zeroToday: false, streak: 2, days: [] };
   statsHeld = false;
-  useStore.setState({ view: "inbox", account: null, query: "", selected: null, compose: null, settingsOpen: false, paletteOpen: false });
+  // the All view, as the inbox was before Unread: these are about the list as it is
+  useStore.setState({ view: "inbox", account: null, query: "", selected: null, compose: null, settingsOpen: false, paletteOpen: false, inboxShows: { "": "all" } });
 });
 afterEach(async () => {
   await unmount?.();

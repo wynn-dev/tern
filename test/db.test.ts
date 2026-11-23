@@ -30,6 +30,13 @@ test("full-text search with prefixes", () => {
   expect(db.queryThreads({ view: "all", q: "nothing" })).toHaveLength(0);
 });
 
+test("the Unread view lists only unread threads", () => {
+  expect(db.queryThreads({ view: "inbox", unread: true })).toHaveLength(1);
+  for (const m of db.threadMessages("a", "t")) db.setMessageLabels("a", m.id, m.labels.filter((l) => l !== "UNREAD"));
+  expect(db.queryThreads({ view: "inbox", unread: true })).toHaveLength(0);
+  expect(db.queryThreads({ view: "inbox" })).toHaveLength(1);
+});
+
 test("archiving drops it from the inbox, keeps it in all mail", () => {
   for (const m of db.threadMessages("a", "t")) db.setMessageLabels("a", m.id, m.labels.filter((l) => l !== "INBOX"));
   expect(db.queryThreads({ view: "inbox" })).toHaveLength(0);

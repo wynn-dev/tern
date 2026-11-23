@@ -3,15 +3,15 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircleIcon, HourglassIcon, Loader2Icon, PaperclipIcon, SearchIcon, StarIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { type CSSProperties, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { prefetchThread, useAccounts, useStats, useThreads } from "@/hooks/data";
+import { keepOpen, openCopy, prefetchThread, useAccounts, useStats, useThread, useThreads } from "@/hooks/data";
 import { api, threadKey, type Account, type Thread } from "@/lib/api";
 import { scopedCounts, viewUnread } from "@/lib/counts";
 import { accountTrouble, CATCHING_UP, displayName, firstName, shortDate, signedOut } from "@/lib/format";
-import { useStore } from "@/lib/store";
+import { inboxShows, unreadView, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { CategoryChip, CATEGORY, Ticker } from "./bits";
-import { ZeroBand } from "./inbox-zero";
+import { ZeroBand, ZeroPane } from "./inbox-zero";
 import { LoadError } from "./load-error";
 import { Button } from "./ui/button";
 
@@ -62,10 +62,36 @@ export const VIEW_TITLES: Record<string, string> = {
 };
 export const viewTitle = (v: string) => VIEW_TITLES[v] ?? (v.startsWith("category:") ? CATEGORY[v.slice(9)]?.label : v.slice(6)) ?? v;
 
+/** The list as shown: in the Unread view, its unread threads and the one you have open. */
 export function useVisibleThreads() {
   const q = useThreads();
-  const threads = useMemo(() => q.data?.pages.flatMap((p) => p.threads) ?? [], [q.data]);
+  const unread = useStore(unreadView);
+  const open = useStore((s) => (unread ? s.selected : null));
+  const account = useStore((s) => s.account);
+  const qc = useQueryClient();
+  const all = useMemo(() => q.data?.pages.flatMap((p) => p.threads) ?? [], [q.data]);
+  // opened from outside the list (a reload on a read thread): load it, so it's listed while it's open
+  const missing = open && !all.some((t) => threadKey(t) === open) ? open : null;
+  const { data: fetched } = useThread(missing);
+  const threads = useMemo(
+    () => (unread ? keepOpen(all, open, () => openCopy(qc, open, account)) : all),
+    [all, unread, open, fetched, account, qc], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   return { ...q, threads };
+}
+
+/**
+ * The Unread view with nothing left in it: the inbox-zero moment takes the place of the list and the reader.
+ * Never for a list that failed to load or an account that can't sync, which say so instead.
+ */
+export function useZeroScreen() {
+  const unread = useStore(unreadView);
+  const open = useStore((s) => !!s.selected);
+  const account = useStore((s) => s.account);
+  const { threads, isLoading, error } = useVisibleThreads();
+  const { data } = useAccounts();
+  const broken = !!data?.accounts.some((a) => a.status === "error" && (!account || a.id === account));
+  return unread && !open && !!data && !isLoading && !error && !threads.length && !broken;
 }
 
 function participantsLabel(t: Thread, me: string | undefined) {
@@ -136,6 +162,8 @@ const Row = memo(function Row({
 
 export function ThreadList() {
   const { view, account, query, selected, select, setQuery } = useStore();
+  const unreadOnly = useStore(unreadView);
+  const zeroScreen = useZeroScreen();
   const {
     threads, isLoading, error, isRefetchError, isFetchNextPageError, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage,
   } = useVisibleThreads();
@@ -149,7 +177,7 @@ export function ThreadList() {
   const v = useVirtualizer({ count: threads.length, getScrollElement: () => parent.current, estimateSize: () => ROW, overscan: 12 });
   const items = v.getVirtualItems();
   const { ghosts, arrived } = useRowMotion(
-    `${view}\u0000${account}\u0000${query}`,
+    `${view}\u0000${account}\u0000${query}\u0000${unreadOnly}`,
     threads,
     items.flatMap((it) => (threads[it.index] ? [{ t: threads[it.index], top: it.start, selected: threadKey(threads[it.index]) === selected }] : [])),
   );
@@ -179,7 +207,11 @@ export function ThreadList() {
 
   return (
     // below ~1200 px the list gives up width (down to 320 px) so the reader isn't squeezed
-    <section aria-label="Conversations" className="flex w-[clamp(320px,calc(50vw-180px),420px)] shrink-0 flex-col border-r bg-background">
+    // at zero in the Unread view it takes the reader's place too, header and search kept so typing a search goes on
+    <section
+      aria-label="Conversations"
+      className={cn("flex flex-col bg-background", zeroScreen ? "min-w-0 flex-1" : "w-[clamp(320px,calc(50vw-180px),420px)] shrink-0 border-r")}
+    >
       <header className="relative flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <motion.h1 key={view} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="text-[14px] font-semibold tracking-tight">
           {viewTitle(view)}
@@ -207,10 +239,12 @@ export function ThreadList() {
             style={{ width: `${progress * 100}%` }}
           />
         )}
+        {triaging && <ShowsToggle className={cleared ? undefined : "ml-auto"} />}
       </header>
       <SearchBox value={query} onChange={setQuery} />
       {!!broken.length && !(acc && !threads.length) && <BrokenBanner accounts={broken} />}
-      {!isLoading && !!threads.length && <ZeroBand />}
+      {/* the Unread view has the whole moment once it empties, rather than a band over the one you're reading */}
+      {!isLoading && !!threads.length && !unreadOnly && <ZeroBand />}
       {!!limited.length && (
         <div role="status" className="flex h-8 shrink-0 items-center gap-2 border-b bg-muted/60 px-4 text-[12px] text-muted-foreground">
           <HourglassIcon className="size-3.5 shrink-0" />
@@ -234,6 +268,8 @@ export function ThreadList() {
           <Skeleton />
         ) : error && !threads.length ? (
           <LoadError title="Couldn't load your mail" error={error} retrying={isFetching} onRetry={() => void refetch()} />
+        ) : zeroScreen ? (
+          <ZeroPane />
         ) : !threads.length && acc?.status === "error" ? (
           <BrokenAccount account={acc} />
         ) : !threads.length ? (
@@ -297,6 +333,29 @@ export function ThreadList() {
         )}
       </div>
     </section>
+  );
+}
+
+/** Unread or All, in words: the Inbox's view, remembered per account. */
+function ShowsToggle({ className }: { className?: string }) {
+  const shows = useStore(inboxShows);
+  const toggle = useStore((s) => s.toggleInboxShows);
+  return (
+    <div role="group" aria-label="Show in the Inbox" title="Show unread or all inbox mail (V)" className={cn("flex shrink-0 items-center gap-0.5 text-[12px]", className)}>
+      {(["unread", "all"] as const).map((v) => (
+        <button
+          key={v}
+          aria-pressed={shows === v}
+          onClick={() => shows !== v && toggle()}
+          className={cn(
+            "rounded px-1.5 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand",
+            shows === v ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {v === "unread" ? "Unread" : "All"}
+        </button>
+      ))}
+    </div>
   );
 }
 

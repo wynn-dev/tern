@@ -115,8 +115,8 @@ export const api = {
   sync: (id: string) => req("POST", `/api/accounts/${id}/sync`),
   /** Look for new mail in every account now; the server does it at most once every 5 s. */
   syncAll: () => req("POST", "/api/sync"),
-  threads: (p: { view: string; account?: string; q?: string; cursor?: string }) => {
-    const s = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
+  threads: (p: { view: string; account?: string; q?: string; unread?: boolean; cursor?: string }) => {
+    const s = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "" && v !== false).map(([k, v]) => [k, v === true ? "1" : String(v)]));
     return req<{ threads: Thread[]; next: string | null }>("GET", `/api/threads?${s}`);
   },
   thread: (account: string, thread: string) => req<{ thread: Thread; messages: Message[] }>("GET", `/api/threads/${account}/${thread}`),

@@ -100,7 +100,8 @@ beforeEach(() => {
   server = Array.from({ length: 12 }, (_, i) => thread(i));
   sent = [];
   threadDelay = 40;
-  useStore.setState({ view: "inbox", account: null, query: "", selected: null, compose: null, settingsOpen: false, paletteOpen: false });
+  // the All view, as the inbox was before Unread: these are about the list as it is
+  useStore.setState({ view: "inbox", account: null, query: "", selected: null, compose: null, settingsOpen: false, paletteOpen: false, inboxShows: { "": "all" } });
 });
 afterEach(async () => {
   await unmount?.();
