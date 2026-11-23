@@ -58,6 +58,12 @@ There's one SSE stream, `/api/events`. Sync, AI and actions emit `{type, keys}`.
 - User labels are matched by name, so a label that several accounts share is one view; spam only appears under Spam.
 - Mail is marked read after 600 ms on a thread, so flicking through with j/k doesn't mark everything read.
 
+## Updates (`update.ts`, `scripts/compile.ts`)
+
+- Every binary has its build identity, the `main` commit and the build time, compiled in with `bun build --define`. The release workflow sets the same identity on all four binaries and publishes it as `build.json`, uploaded last, next to the binaries and `checksums.txt`.
+- The server fetches `build.json` from the edge release's download URL, not the GitHub API, so checks don't count against the unauthenticated API limit. It checks 10 s after it starts and every 6 h after that, or right away when someone clicks *Check for updates*. An update exists when edge is on a different commit that was built later.
+- `POST /api/update` and `tern update` share one path: download the platform asset, verify its sha256, write it to a temp file beside `~/.local/bin/tern`, then rename it over the old binary. When the service is running, its manager is checked first, a hard link keeps the old binary as `tern.old`, and the restart is requested with `systemctl --user --no-block restart` or `launchctl kickstart -k`. If that's refused, `tern.old` is renamed back. The new process deletes `tern.old` once it's up. The page sees the event stream drop and reconnect, and polls `/api/update` until the new build answers.
+
 ## Security
 
 - Binds to `127.0.0.1` by default. `tern password` adds a password (argon2 hash, signed `SameSite=Strict` session cookie).

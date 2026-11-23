@@ -14,7 +14,7 @@ A fast, quiet, self-hosted mail client for all your Gmail accounts at once, with
 curl -fsSL https://raw.githubusercontent.com/wynn-dev/tern/main/install.sh | sh
 ```
 
-This downloads the prebuilt binary for your machine (Linux or macOS, x64 or arm64) from the rolling [`edge` release](https://github.com/wynn-dev/tern/releases/tag/edge), which is rebuilt from every push to `main`. It checks the binary against `checksums.txt`, puts it at `~/.local/bin/tern` and runs `tern install`, which starts the background service. Run the same line again to update. To only install the binary, set `TERN_SKIP_SETUP=1`.
+This downloads the prebuilt binary for your machine (Linux or macOS, x64 or arm64) from the rolling [`edge` release](https://github.com/wynn-dev/tern/releases/tag/edge), which is rebuilt from every push to `main`. It checks the binary against `checksums.txt`, puts it at `~/.local/bin/tern` and runs `tern install`, which starts the background service. To only install the binary, set `TERN_SKIP_SETUP=1`. Once installed, Tern [updates itself](#update).
 
 Or build from source with [Bun](https://bun.sh):
 
@@ -25,6 +25,19 @@ bun run build          # → dist/tern, a single self-contained binary
 ```
 
 Then open http://localhost:7420.
+
+### Update
+
+Tern looks at the `edge` release when it starts and then every six hours. Each build knows the commit of `main` it was built from and when; the release publishes the same for the newest build in `build.json`. When edge is on a newer commit, *Settings → Updates* says so, and a small notice at the bottom of the sidebar offers it (*Not now* hides it until the next build). Nothing installs until you click **Update**. *Check for updates* looks right away.
+
+Update downloads the same binary for your machine that `install.sh` would, checks it against the release's `checksums.txt`, writes it to a temporary file next to `~/.local/bin/tern` and renames it over the old one, so the binary is never half-written. Your accounts, mail and settings live in the data folder and aren't touched. Then:
+
+- **Running as the service** (`tern install`): systemd or launchd restarts Tern on the new build. An open page reconnects by itself, Settings shows the new build, and a *Reload* button picks up the new interface.
+- **Running in the foreground** (`tern serve`): the new binary is installed, and Tern asks you to restart it.
+
+If anything goes wrong (no network, a checksum that doesn't match, a folder Tern can't write to, a service manager that can't restart it), the old binary stays in place and keeps running, and Tern says what happened.
+
+From a terminal, `tern update` does the same thing. `tern version` prints the build you're on. Running the install one-liner again still works too. A build from source (`bun src/cli/main.ts`) doesn't update itself; use `git pull`.
 
 ### Connect Google (once)
 
@@ -63,6 +76,8 @@ With no endpoint set, Tern removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` a
 | Command | |
 |---|---|
 | `tern status` | service state, URL, data dir |
+| `tern update` | install the newest edge build and restart the service |
+| `tern version` | the version and build (commit, date) you're on |
 | `tern open` | open in the browser |
 | `tern logs -f` | follow the log |
 | `tern restart` / `stop` / `start` | |
@@ -86,13 +101,15 @@ bun test
 bun run typecheck
 ```
 
-To test `install.sh` without a release, build a binary, serve it with its checksums and point the script at that server:
+To test `install.sh` or the updater without a release, build a binary, serve it with its checksums and `build.json`, and point the script (or a running Tern, through the same variable) at that server:
 
 ```sh
 bun run build:web && bun run build:embed
-bun build --compile --minify --target=bun-linux-x64 src/cli/main.ts --outfile dist/release/tern-linux-x64
+bun scripts/compile.ts --target bun-linux-x64 --outfile dist/release/tern-linux-x64
+printf '{"sha":"%s","time":"%s"}\n' "$(git rev-parse HEAD)" "$(date -u +%FT%TZ)" > dist/release/build.json
 (cd dist/release && sha256sum tern-* > checksums.txt && python3 -m http.server 8765) &
 TERN_DOWNLOAD_URL=http://127.0.0.1:8765 sh install.sh
+TERN_DOWNLOAD_URL=http://127.0.0.1:8765 ~/.local/bin/tern update
 ```
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.

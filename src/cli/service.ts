@@ -1,8 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { dataDir } from "../server/config";
+import type { ServiceControl } from "../server/update";
 
 const LABEL = "dev.tern.server";
 const isMac = platform() === "darwin";
@@ -120,4 +121,23 @@ export const service = {
     const user = process.env.USER;
     if (user) run("loginctl", ["enable-linger", user], true);
   },
+};
+
+/** The service as the updater sees it (src/server/update.ts), the same from the CLI and from inside the service. */
+export const serviceControl: ServiceControl = {
+  state() {
+    const manager = isMac ? "launchd" : "systemd";
+    const installed = existsSync(unitPath());
+    if (!installed) return { installed, running: false, reachable: false, manager };
+    const reachable = isMac ? run("launchctl", ["print", `gui/${uid()}`], true).ok : run("systemctl", ["--user", "show-environment"], true).ok;
+    return { installed, running: reachable && service.status().running, reachable, manager };
+  },
+  // detached and not waited on by the manager: run from inside the service, it outlives the stop it asks for
+  restart: () =>
+    new Promise((resolve) => {
+      const [cmd, args] = isMac ? ["launchctl", ["kickstart", "-k", `gui/${uid()}/${LABEL}`]] : ["systemctl", ["--user", "--no-block", "restart", "tern.service"]];
+      const p = spawn(cmd, args as string[], { detached: true, stdio: "ignore" });
+      p.on("error", () => resolve(false));
+      p.on("exit", (code) => resolve(code === 0));
+    }),
 };

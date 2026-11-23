@@ -7,7 +7,9 @@ import { parseArgs } from "node:util";
 import pkg from "../../package.json";
 import { dataDir, EFFORTS, type Effort, loadConfig, publicUrl, saveConfig, type Config } from "../server/config";
 import { seal } from "../server/crypto";
-import { binDir, installBinary, installedBin, logPath, service, writeUnit } from "./service";
+import { describeBuild, thisBuild } from "../server/build";
+import { dropBackup, finish, update, UpdateError } from "../server/update";
+import { binDir, installBinary, installedBin, logPath, service, serviceControl, writeUnit } from "./service";
 
 const c = {
   bold: (s: string) => `\x1b[1m${s}\x1b[22m`,
@@ -28,6 +30,7 @@ const HELP = `${c.bold("tern")} ${c.dim(pkg.version)} — a fast, self-hosted cl
 ${c.bold("Usage")}
   tern install [--port 7420] [--host 127.0.0.1] [--public-url URL]
                           install the binary and run Tern as a background service
+  tern update             install the newest edge build and restart the service
   tern setup google       connect Tern to your own Google OAuth client
   tern open               open Tern in your browser
   tern status             is the service running, and where
@@ -63,6 +66,8 @@ async function main() {
       await serve({ demo: !!values.demo, port: values.port ? Number(values.port) : undefined, host: values.host as string | undefined });
       return;
     }
+    case "update":
+      return selfUpdate();
     case "install":
       return install(values as Record<string, string | boolean | undefined>);
     case "setup":
@@ -107,7 +112,7 @@ async function main() {
     case "version":
     case "--version":
     case "-v":
-      console.log(pkg.version);
+      console.log(`${pkg.version} (${describeBuild(thisBuild)})`);
       return;
     default:
       console.log(HELP);
@@ -137,6 +142,25 @@ async function install(v: Record<string, string | boolean | undefined>) {
   }
   if (cfg.host !== "127.0.0.1" && !cfg.passwordHash) warn("Tern is reachable from your network without a password. Run `tern password`.");
   if (!Bun.which("claude")) warn("Claude Code isn't installed, so AI features are off. Install it and run `claude` once to sign in with your Claude subscription.");
+}
+
+/** The same path as Settings › Update: download, verify, replace, then restart the service onto it. */
+async function selfUpdate() {
+  const target = installedBin();
+  try {
+    console.log(c.dim(`this build: ${describeBuild(thisBuild)}`));
+    const r = await update({ service: serviceControl, target, onStep: (s) => console.log(c.dim(`  ${s}…`)) });
+    if ("upToDate" in r) return ok(`Tern is up to date (edge is ${describeBuild(r.upToDate)})`);
+    ok(`installed ${describeBuild(r.build)} at ${target}`);
+    if (r.next === "restart") {
+      await finish(r, serviceControl);
+      dropBackup(target);
+      ok("restarted the service; open pages reconnect on their own");
+    } else if (r.next === "start") console.log("The service is stopped; `tern start` runs the new build.");
+    else warn("Tern isn't running as the installed service. Restart it to use the new build, or run `tern install` to make it a service.");
+  } catch (e) {
+    fail(e instanceof UpdateError ? e.message : `The update failed: ${(e as Error).message}. Nothing was replaced.`);
+  }
 }
 
 async function setupGoogle() {

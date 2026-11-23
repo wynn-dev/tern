@@ -30,19 +30,22 @@ jobs:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
 
-      # what `bun run build` does, once per target
+      # what `bun run build` does, once per target. Every binary carries the same build identity
+      # (commit and time), which build.json publishes for running Terns to compare theirs against.
       - name: Build
         run: |
           bun run build:web
           bun run build:embed
           mkdir -p dist/release
+          export TERN_BUILD_SHA="$GITHUB_SHA" TERN_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
-            bun build --compile --minify --target="bun-$target" src/cli/main.ts --outfile "dist/release/tern-$target"
+            bun scripts/compile.ts --target "bun-$target" --outfile "dist/release/tern-$target"
           done
-          cd dist/release && sha256sum tern-* > checksums.txt && cat checksums.txt
+          printf '{"sha":"%s","time":"%s"}\n' "$TERN_BUILD_SHA" "$TERN_BUILD_TIME" > dist/release/build.json
+          cd dist/release && sha256sum tern-* > checksums.txt && cat checksums.txt build.json
 
       - name: Smoke test
-        run: dist/release/tern-linux-x64 version
+        run: dist/release/tern-linux-x64 version | grep -F "${GITHUB_SHA:0:7}"
 
       - name: Publish edge
         run: |
@@ -50,10 +53,12 @@ jobs:
           git push -f origin refs/tags/edge
           notes="Rolling build of main at ${GITHUB_SHA}.
 
-          Install or update: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`"
+          Running Tern updates itself from Settings, or with \`tern update\`. Install: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | sh\`"
           if gh release view edge >/dev/null 2>&1; then
             gh release edit edge --prerelease --title "edge" --notes "$notes"
           else
             gh release create edge --prerelease --title "edge" --notes "$notes" --verify-tag
           fi
-          gh release upload edge dist/release/* --clobber
+          # build.json last: a Tern that sees the new build finds its binaries and checksums already there
+          gh release upload edge dist/release/tern-* dist/release/checksums.txt --clobber
+          gh release upload edge dist/release/build.json --clobber

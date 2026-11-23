@@ -13,6 +13,8 @@ import { events } from "./events";
 import { authUrl, exchangeCode, gmail, redirectUri } from "./gmail";
 import { stats } from "./stats";
 import { syncAccount, syncSoon } from "./sync";
+import { checkForUpdate, demoUpdateStatus, installUpdate, UpdateError, updateStatus } from "./update";
+import { installedBin, serviceControl } from "../cli/service";
 
 export type AppOptions = { demo: boolean; assets?: Record<string, string> };
 
@@ -268,6 +270,19 @@ export function createApp(opts: AppOptions) {
     return c.json({ ok: true });
   });
 
+  // ---------- updating Tern itself ----------
+  app.get("/api/update", (c) => c.json(opts.demo ? demoUpdateStatus() : updateStatus()));
+  app.post("/api/update/check", async (c) => {
+    if (!opts.demo) await checkForUpdate();
+    return c.json(opts.demo ? demoUpdateStatus() : updateStatus());
+  });
+  // only ever on the person's click: nothing installs by itself
+  app.post("/api/update", async (c) => {
+    if (opts.demo) throw new UpdateError("Updating is off in the demo.");
+    const r = await installUpdate(serviceControl, installedBin());
+    return c.json({ ...r, status: updateStatus() });
+  });
+
   // ---------- live updates ----------
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
@@ -289,6 +304,7 @@ export function createApp(opts: AppOptions) {
     if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
     if (err instanceof AiError) return c.json({ error: err.message, code: err.code }, err.httpStatus);
     if (err instanceof SendError) return c.json({ error: err.message }, 400);
+    if (err instanceof UpdateError) return c.json({ error: err.message }, 409);
     console.error(`[api] ${c.req.method} ${c.req.path}:`, err.message);
     return c.json({ error: err.message }, 500);
   });

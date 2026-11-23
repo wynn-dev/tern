@@ -5,6 +5,8 @@ import { ensureDataDir, loadConfig, setServeAddress } from "./config";
 import { openDb } from "./db";
 import { seedDemo } from "./demo";
 import { startSyncLoop } from "./sync";
+import { dropBackup, startUpdateChecks } from "./update";
+import { installedBin } from "../cli/service";
 
 export async function serve(opts: { demo?: boolean; port?: number; host?: string }) {
   const cfg = loadConfig();
@@ -27,7 +29,12 @@ export async function serve(opts: { demo?: boolean; port?: number; host?: string
   setServeAddress({ hostname, port: server.port ?? port });
   console.log(`tern ${demo ? "(demo) " : ""}listening on http://${hostname}:${server.port}`);
 
-  if (!demo) startSyncLoop(() => void classifyPending());
+  if (!demo) {
+    startSyncLoop(() => void classifyPending());
+    startUpdateChecks();
+    // up on the installed binary: the copy of the one before it, kept in case the restart failed, can go
+    if (process.execPath === installedBin()) dropBackup(installedBin());
+  }
 
   const stop = () => {
     server.stop();
