@@ -53,6 +53,14 @@ export type AiStatus = {
   enabled: boolean; claudePath: string | null; mode: "login" | "endpoint"; endpoint: string | null; busy: boolean; lastError: string | null;
   lastErrorCode: "signed_out" | "missing" | "rate_limited" | "failed" | null; classified: number;
 };
+/** A build of Tern: the main commit it was built from and when. See src/server/update.ts. */
+export type Build = { sha: string; time: string };
+export type UpdateStatus = {
+  current: Build | null; latest: Build | null; available: boolean; checkedAt: number | null; checking: boolean; checkError: string | null;
+  updating: boolean; error: string | null; installed: Build | null; demo?: boolean;
+};
+/** What clicking Update did: `restart`, the service is restarting onto `build`; `manual`/`start`, it's installed for the next start; `none`, already newest. */
+export type UpdateResult = { next: "restart" | "start" | "manual" | "none"; build: Build; status: UpdateStatus };
 export type Action = "archive" | "inbox" | "star" | "unstar" | "read" | "unread" | "trash" | "untrash" | "spam" | "notspam";
 
 export class ApiError extends Error {
@@ -120,6 +128,9 @@ export const api = {
   aiStatus: () => req<AiStatus>("GET", "/api/ai/status"),
   summarize: (accountId: string, threadId: string) => req<{ summary: string; actions: string[] }>("POST", "/api/ai/summarize", { accountId, threadId }),
   draft: (accountId: string, threadId: string, instruction?: string) => req<{ body: string }>("POST", "/api/ai/draft", { accountId, threadId, instruction }),
+  updateStatus: () => req<UpdateStatus>("GET", "/api/update"),
+  checkForUpdate: () => req<UpdateStatus>("POST", "/api/update/check"),
+  installUpdate: () => req<UpdateResult>("POST", "/api/update"),
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (s: { google?: { clientId: string; clientSecret: string }; ai?: AiPatch }) => req("PUT", "/api/settings", s),
 };

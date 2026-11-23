@@ -12,6 +12,7 @@ import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
 import { IconButton } from "./ui/icon-button";
 import { Input } from "./ui/input";
+import { UpdateSection } from "./update";
 
 const MODELS = [
   { id: "claude-haiku-5-5", label: "Haiku 5.5 — fastest, lightest on your plan" },
@@ -67,7 +68,7 @@ export function SettingsDialog() {
     <Dialog open={settingsOpen} onOpenChange={(o) => set({ settingsOpen: o })}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[600px]">
         <DialogTitle>Settings</DialogTitle>
-        <DialogDescription className="-mt-3">Accounts, the Google connection and AI.</DialogDescription>
+        <DialogDescription className="-mt-3">Accounts, the Google connection, AI and updates.</DialogDescription>
         {settingsOpen && <SettingsBody />}
       </DialogContent>
     </Dialog>
@@ -199,6 +200,8 @@ function SettingsBody() {
         </datalist>
         {settings && <EndpointFields ai={settings.ai} />}
       </Section>
+
+      <UpdateSection />
 
       {session?.passwordRequired && (
         <Button variant="ghost" onClick={() => api.signOut().then(() => location.reload())}>

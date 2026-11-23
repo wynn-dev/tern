@@ -9,7 +9,7 @@
     "demo": "bun src/cli/main.ts serve --demo --port 7420",
     "build:web": "vite build",
     "build:embed": "bun scripts/embed.ts",
-    "build": "bun run build:web && bun run build:embed && bun build --compile --minify src/cli/main.ts --outfile dist/tern",
+    "build": "bun run build:web && bun run build:embed && bun scripts/compile.ts --outfile dist/tern",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

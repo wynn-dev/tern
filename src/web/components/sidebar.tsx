@@ -13,6 +13,7 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { CATEGORY, Dot } from "./bits";
 import { IconButton } from "./ui/icon-button";
+import { UpdateNotice } from "./update";
 import { Tooltip } from "./ui/tooltip";
 
 const NAV = [
@@ -173,6 +174,7 @@ export function Sidebar() {
         </div>
       </nav>
 
+      <UpdateNotice />
       <div className="flex items-center gap-1 border-t px-2 py-2">
         <IconButton label="Settings" kbd="," onClick={() => set({ settingsOpen: true })}>
           <SettingsIcon />
