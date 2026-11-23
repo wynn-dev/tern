@@ -12,7 +12,7 @@ const EASE = [0.2, 0.9, 0.1, 1] as const;
 /** Today as the art counts days: the local calendar day. */
 export const today = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-/** When this page first saw zero unread: the moment plays then, and stays still after. */
+/** When this page first showed zero unread: the moment plays then, and stays still after. */
 let firstZeroAt: number | null = null;
 /** For tests: as if the page were opened again. */
 export const resetZeroMoment = () => void (firstZeroAt = null);
@@ -29,13 +29,15 @@ export function useInboxZero() {
   const accounts = (data?.accounts ?? []).filter((a) => !account || a.id === account);
   const c = scopedCounts(data?.counts, account);
   const zero = !!data && view === "inbox" && !query && accounts.length > 0 && !accounts.some((a) => a.status === "error") && c.inboxUnread === 0;
-  if (zero) firstZeroAt ??= Date.now();
   return { zero, empty: zero && c.inbox === 0, account };
 }
 
-/** True when this mounts as zero is first reached in this page's life; false ever after. */
+/**
+ * True when this mounts as zero is first shown in this page's life; false ever after. Shown, not reached: in the
+ * Unread view the last thread is read as it opens, and the moment waits until you move on from it.
+ */
 function useEntrance() {
-  const [entering] = useState(() => firstZeroAt !== null && Date.now() - firstZeroAt < 1000);
+  const [entering] = useState(() => Date.now() - (firstZeroAt ??= Date.now()) < 1000);
   return entering;
 }
 

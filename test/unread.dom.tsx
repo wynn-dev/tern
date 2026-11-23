@@ -253,3 +253,31 @@ test("switching to Unread with a read thread open keeps it listed until you move
   expect(useStore.getState().selected).toBe("a:t3");
   expect(rows()).toEqual(["a:t0", "a:t1", "a:t3"]);
 });
+
+test("k on the top thread leaves it open and selected, read or not", async () => {
+  await render();
+  await press("j");
+  expect(useStore.getState().selected).toBe("a:t0");
+  await press("k");
+  expect(useStore.getState().selected).toBe("a:t0");
+  expect(rows()).toEqual(["a:t0", "a:t1", "a:t3"]);
+  expect(document.querySelector("main")).not.toBeNull();
+});
+
+test("the zero moment comes in when the list empties, however long the last thread was open", async () => {
+  server = [thread(0, 1), thread(2, 0)];
+  await render();
+  await press("j");
+  expect(useStore.getState().selected).toBe("a:t0");
+  // read properly: several seconds on the last one before moving on
+  const now = Date.now;
+  Date.now = () => now() + 5_000;
+  try {
+    await press("j");
+    expect(zeroScreen()).not.toBeNull();
+    expect(zeroScreen()?.querySelector("svg.zero-enter")).not.toBeNull();
+    expect(zeroScreen()?.querySelector(".zero-text")).not.toBeNull();
+  } finally {
+    Date.now = now;
+  }
+});
