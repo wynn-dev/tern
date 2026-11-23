@@ -69,8 +69,8 @@ export function keyHandler(get: () => Ctx) {
     const current: Thread | undefined = threads[i];
     const move = (d: number) => {
       const next = threads[Math.max(0, Math.min(threads.length - 1, (i < 0 ? -1 : i) + d))] ?? threads[0];
-      // in the Unread view, moving on from a read thread with nowhere to go closes it, so it leaves and the list can empty
-      if (next && next === current && !current.unread && unreadView(s)) {
+      // in the Unread view, j on the last thread, read, closes it, so it leaves and the list can empty; k at the top stays put
+      if (d > 0 && next && next === current && !current.unread && unreadView(s)) {
         s.select(null);
         followFocus(el, "");
         return;
