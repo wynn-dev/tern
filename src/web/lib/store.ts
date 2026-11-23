@@ -18,6 +18,9 @@ export type ComposeDraft = {
   generated?: boolean;
 };
 
+/** What the Inbox lists: only unread threads, or all of them. */
+export type InboxShows = "unread" | "all";
+
 type State = {
   view: string;
   account: string | null;
@@ -30,6 +33,8 @@ type State = {
   paletteOpen: boolean;
   settingsOpen: boolean;
   helpOpen: boolean;
+  /** The Inbox's Unread / All choice, by account id, and "" for All accounts. Unset is Unread. */
+  inboxShows: Record<string, InboxShows>;
   setView: (view: string, account?: string | null) => void;
   setQuery: (q: string) => void;
   select: (key: string | null) => void;
@@ -40,6 +45,8 @@ type State = {
   /** Close the draft, asking first if it has edits. False when the person keeps it. */
   discardCompose: () => boolean;
   minimizeCompose: (min: boolean) => void;
+  /** Switch the Inbox you're looking at between Unread and All, and remember it for that account. */
+  toggleInboxShows: () => void;
   set: (p: Partial<Pick<State, "paletteOpen" | "settingsOpen" | "helpOpen">>) => void;
 };
 
@@ -60,6 +67,21 @@ export const isDirty = (opened: ComposeDraft | null) =>
 
 const confirmDiscard = () => confirm("Discard the draft you're writing?");
 
+const SHOWS_KEY = "tern-inbox-shows";
+/** The Unread / All choices as saved, which a reload starts from. */
+export function storedShows(): Record<string, InboxShows> {
+  try {
+    const v = JSON.parse(localStorage.getItem(SHOWS_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+export const inboxShows = (s: Pick<State, "account" | "inboxShows">): InboxShows => s.inboxShows[s.account ?? ""] ?? "unread";
+/** The Inbox's Unread view is what's listed: the Inbox, not a search, set to Unread. */
+export const unreadView = (s: Pick<State, "view" | "query" | "account" | "inboxShows">) => s.view === "inbox" && !s.query && inboxShows(s) === "unread";
+
 const initial: Route = typeof location === "undefined" ? { view: "inbox", account: null, query: "", selected: null } : parseRoute(location);
 
 export const useStore = create<State>((set, get) => ({
@@ -70,6 +92,7 @@ export const useStore = create<State>((set, get) => ({
   paletteOpen: false,
   settingsOpen: false,
   helpOpen: false,
+  inboxShows: storedShows(),
   setView: (view, account) => set((s) => ({ view, account: account === undefined ? s.account : account, selected: null, cursor: 0, query: "" })),
   setQuery: (query) => set({ query, cursor: 0 }),
   select: (selected) => set({ selected }),
@@ -101,6 +124,14 @@ export const useStore = create<State>((set, get) => ({
     return true;
   },
   minimizeCompose: (composeMinimized) => set({ composeMinimized }),
+  toggleInboxShows: () => {
+    const s = get();
+    const next = { ...s.inboxShows, [s.account ?? ""]: inboxShows(s) === "unread" ? ("all" as const) : ("unread" as const) };
+    try {
+      localStorage.setItem(SHOWS_KEY, JSON.stringify(next));
+    } catch {}
+    set({ inboxShows: next });
+  },
   set: (p) => set(p),
 }));
 

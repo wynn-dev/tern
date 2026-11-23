@@ -88,9 +88,9 @@ With no endpoint set, Tern removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` a
 
 New mail shows up within about 10 seconds. Tern asks Gmail for changes every 10 seconds, and also as soon as you come back to the Tern tab. Each check costs a sliver of Gmail's quota. To check less often, run `tern config sync.intervalSec 60` and then `tern restart`. `tern config sync.intervalSec 10` puts it back to the default. While Gmail is rate-limiting Tern, checks wait until Gmail allows them again, and the account says it's catching up.
 
-Tern counts what you clear in it each day: unread inbox mail you read, and mail you archive or trash. When nothing in your inbox is unread, it marks the moment with a new piece of art each day and keeps your days-at-zero streak.
+Tern counts what you clear in it each day: unread inbox mail you read, and mail you archive or trash. The Inbox opens on Unread, which lists only unread mail. A thread you open stays there until you move on, so reading through it empties the list. When nothing in your inbox is unread, it marks the moment with a new piece of art each day and keeps your days-at-zero streak. Press `v` (or click All in the list header) to see read Inbox mail too. Tern remembers the choice for each account.
 
-Keyboard: `j/k` move · `enter` open · `e` archive · `#` trash · `s` star · `u` unread · `r` reply · `a` reply all · `c` compose · `/` search · `g i` inbox · `⌘K` commands · `?` all shortcuts.
+Keyboard: `j/k` move · `enter` open · `e` archive · `#` trash · `s` star · `u` unread · `v` unread / all · `r` reply · `a` reply all · `c` compose · `/` search · `g i` inbox · `⌘K` commands · `?` all shortcuts.
 
 ## Develop
 

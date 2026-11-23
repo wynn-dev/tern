@@ -180,7 +180,7 @@ export function createApp(opts: AppOptions) {
     const limit = Math.min(Number(q.limit ?? 60), 200);
     if (!Number.isInteger(limit) || limit < 1) throw fail(400, "limit must be a whole number above 0");
     if (q.cursor && !db.parseCursor(q.cursor)) throw fail(400, "Bad paging cursor. Load the list again from the top.");
-    const threads = db.queryThreads({ view: q.view ?? "inbox", account: q.account || undefined, q: q.q || undefined, cursor: q.cursor || undefined, limit });
+    const threads = db.queryThreads({ view: q.view ?? "inbox", account: q.account || undefined, q: q.q || undefined, unread: q.unread === "1", cursor: q.cursor || undefined, limit });
     return c.json({ threads, next: threads.length === limit ? db.threadCursor(threads.at(-1)!) : null });
   });
 

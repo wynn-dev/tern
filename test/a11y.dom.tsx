@@ -62,6 +62,8 @@ function client(accs = accounts) {
   qc.setQueryData(["ai-status"], { enabled: true, claudePath: "/bin/claude", busy: false, lastError: null, lastErrorCode: null, classified: 3 });
   qc.setQueryData(["settings"], { google: { configured: false, clientId: "" }, redirectUri: "http://localhost:7420/oauth/callback", ai: { enabled: true, classifyModel: "claude-haiku-5-5", writeModel: "claude-sonnet-5-5" } });
   qc.setQueryData(["threads", "inbox", null, ""], { pages: [{ threads: [thread], next: null }], pageParams: [undefined] });
+  // the Inbox opens on Unread, where the open thread is listed while it's open
+  qc.setQueryData(["threads", "inbox", null, "", "unread"], { pages: [{ threads: [], next: null }], pageParams: [undefined] });
   qc.setQueryData(["thread", "a:t1"], { thread, messages });
   return qc;
 }

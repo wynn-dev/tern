@@ -346,7 +346,8 @@ export function rebuildThread(accountId: string, threadId: string) {
 type ThreadRow = Omit<Thread, "participants" | "labels"> & { participants: string; labels: string };
 const toThread = (r: ThreadRow): Thread => ({ ...r, participants: JSON.parse(r.participants), labels: JSON.parse(r.labels) });
 
-export type ThreadQuery = { view: string; account?: string; q?: string; cursor?: string; limit?: number };
+/** `unread`: only unread threads, for the Inbox's Unread view. */
+export type ThreadQuery = { view: string; account?: string; q?: string; unread?: boolean; cursor?: string; limit?: number };
 
 /**
  * Where the next page starts: the last thread's (last_date, account_id, thread_id), which is unique,
@@ -364,7 +365,7 @@ export function parseCursor(c: string): [number, string, string] | null {
   }
 }
 
-export function queryThreads({ view, account, q, cursor, limit = 60 }: ThreadQuery): Thread[] {
+export function queryThreads({ view, account, q, unread, cursor, limit = 60 }: ThreadQuery): Thread[] {
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (view === "inbox") where.push("t.in_inbox = 1 AND t.in_trash = 0 AND t.in_spam = 0");
@@ -383,6 +384,7 @@ export function queryThreads({ view, account, q, cursor, limit = 60 }: ThreadQue
       JOIN labels l ON l.account_id = t.account_id AND l.id = j.value WHERE l.name = ?)`);
     args.push(view.slice(6));
   }
+  if (unread) where.push("t.unread = 1");
   if (account) {
     where.push("t.account_id = ?");
     args.push(account);

@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type Que
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError, onSignedOut, threadKey, type AccountsResponse, type Action, type Counts, type Session, type Stats, type Thread } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { unreadView, useStore } from "@/lib/store";
 
 export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: api.accounts, staleTime: 10_000 });
 
@@ -16,9 +16,11 @@ export function useThreads() {
   const view = useStore((s) => s.view);
   const account = useStore((s) => s.account);
   const q = useStore((s) => s.query);
+  const unread = useStore(unreadView);
   return useInfiniteQuery({
-    queryKey: ["threads", view, account, q],
-    queryFn: ({ pageParam }) => api.threads({ view, account: account ?? undefined, q, cursor: pageParam }),
+    // the Unread view is a list of its own; All keeps the key it always had
+    queryKey: unread ? ["threads", view, account, q, "unread"] : ["threads", view, account, q],
+    queryFn: ({ pageParam }) => api.threads({ view, account: account ?? undefined, q, unread, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next ?? undefined,
     placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === view && prevQuery?.queryKey[2] === account ? prev : undefined),
@@ -101,6 +103,39 @@ function unpatch(cur: Thread, orig: Thread, action: Action): Thread {
   const back = FLAGS.filter((f) => p[f] !== orig[f]);
   return back.length ? { ...cur, ...Object.fromEntries(back.map((f) => [f, orig[f]])) } : cur;
 }
+
+/** In the Unread view, the thread you have open as last listed: it stays in the list, read, until you move on. */
+let held: Thread | null = null;
+
+/**
+ * The Unread view of a list: its unread threads, and the open one where it was, read or not, while it's open.
+ * Once the server's list has left it out (read there too), the copy last seen holds its place; `fallback` finds one
+ * for a thread opened from outside the list (a reload, or Unread switched on with a read thread open).
+ */
+export function keepOpen(threads: Thread[], selected: string | null, fallback: () => Thread | undefined = () => undefined): Thread[] {
+  const shown = threads.filter((t) => t.unread || threadKey(t) === selected);
+  if (!selected) {
+    held = null;
+    return shown;
+  }
+  const listed = threads.find((t) => threadKey(t) === selected);
+  if (listed) {
+    held = listed;
+    return shown;
+  }
+  if (held && threadKey(held) !== selected) held = null;
+  const t = held ?? fallback();
+  if (!t || !inInbox(t)) return shown;
+  held = t;
+  const i = shown.findIndex((u) => newer(t, u));
+  return i < 0 ? [...shown, t] : [...shown.slice(0, i), t, ...shown.slice(i)];
+}
+
+/** The open thread for the Unread view of `account` (null: All accounts), from whatever the client holds. */
+export const openCopy = (qc: QueryClient, key: string | null, account: string | null) => {
+  const t = key ? cached(qc, key) : undefined;
+  return t && (!account || t.account_id === account) ? t : undefined;
+};
 
 /** Lists run newest first, as the server orders them. */
 const newer = (a: Thread, b: Thread) =>
@@ -208,6 +243,10 @@ export function makeActions(qc: QueryClient) {
       };
     });
     for (const t of threads) qc.setQueryData<{ thread: Thread }>(["thread", threadKey(t)], (d) => (d ? { ...d, thread: patch(d.thread, resolve(d.thread, action)) } : d));
+    if (held && keys.has(threadKey(held))) {
+      const a = resolve(held, action);
+      held = staysInView(view, a) ? patch(held, a) : null;
+    }
     setCounts(qc, (c) => before.reduce((c, t) => recount(c, t, patch(t, resolve(t, action))), c));
     bumpStats(qc, before, action, !!opts.undo);
 
